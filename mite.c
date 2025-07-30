@@ -228,7 +228,7 @@ void unusedtemp() { (void)temp_sprintf_buf; }
 
 #define RAWSTR2(x) #x
 #define RAWSTR(x) da_append_cstr(out, RAWSTR2(x));
-#define CSTR(x) da_append_cstr(out, (x));
+#define CSTR(x) if ((x)) da_append_cstr(out, (x));
 #define SVP(x) da_append_many(out, (x)->items, (x)->count);
 #define SV(x) SVP(&(x))
 #define STR(x) CSTR((x))
@@ -244,6 +244,7 @@ typedef struct {
 typedef struct {
 	const char* title;
 	const char* date;
+	const char* tags;
 	const char* description;
 	const char* url;
 } SitePage;
@@ -269,6 +270,7 @@ void da_append_escape_html(StringBuilder* out, const char* in, size_t count) {
 }
 
 const char* search_str_until_newline(const char* haystack, const char* needle) {
+	if (!haystack) return NULL;
 	if (!*needle) return haystack;
 
 	const char* hay = haystack;
@@ -403,90 +405,116 @@ void skip_after_newline(const char** cursor) {
 }
 
 void render_md_to_html(StringBuilder* md, StringBuilder* out, StringBuilder* out_fm) {
-	const char* l = md->items;
+	const char* line = md->items;
 	bool started_paragraph = false;
-	while (*l) {
-		while (*l == '\t' || *l == ' ' || *l == '\n')
-			l++;
+	bool started_list = false;
 
-		if (*l == '<') {
-			if (started_paragraph) {
-				da_append_cstr(out, "</p>\n");
-				started_paragraph = false;
+#define start_paragraph() if (!started_paragraph) { da_append_cstr(out,  "<p>\n"); started_paragraph = true; }
+#define   end_paragraph() if (started_paragraph)  { da_append_cstr(out, "</p>\n"); started_paragraph = false; }
+#define start_list() if (!started_list) { da_append_cstr(out,  "<ul>\n"); started_list = true; }
+#define   end_list() if (started_list)  { da_append_cstr(out, "</ul>\n"); started_list = false; }
+
+	while (*line) {
+		const char* line_end = line;
+		while (*line_end && *line_end != '\n') line_end++;
+
+		const char* trimmed = line;
+		while (*trimmed == ' ' || *trimmed == '\t') trimmed++;
+
+		if (line_end - trimmed == 0) {
+			end_paragraph();
+
+		} else if (*trimmed == '<') {
+			end_paragraph();
+
+			const char* html_end_start = search_str_until_newline(trimmed, "</");
+			const char* html_end_end   = search_str_until_newline(html_end_start, ">");
+			if (!html_end_start || !html_end_end) {
+				append_until_newline(out, trimmed);
+			} else {
+				html_end_end++;
+				da_append_many(out, trimmed, html_end_end - trimmed);
+				line = html_end_end;
+				parse_inline(html_end_end, out);
 			}
-			append_until_newline(out, l);
-		} else if (*l == '#') {
+
+		} else if (*trimmed == '#') {
+			end_paragraph();
 			int level = 0;
-			while (*l == '#') {
-				level++;
-				l++;
-			}
-			while (*l == ' ') l++;
+			while (*trimmed == '#') { level++; trimmed++; }
+			while (*trimmed == ' ') trimmed++;
 			char tag[12];
 			sprintf(tag, "h%d", level);
 			da_append(out, '<');
 			da_append_cstr(out, tag);
 			da_append(out, '>');
-			parse_inline(l, out);
+			parse_inline(trimmed, out);
 			da_append_cstr(out, "</");
 			da_append_cstr(out, tag);
 			da_append_cstr(out, ">\n");
 
-		} else if (starts_with(l, "- [ ] ")) {
+		} else if (starts_with(trimmed, "- [ ] ")) {
+			end_paragraph();
 			da_append_cstr(out, "<ul><li><input type=\"checkbox\" disabled>");
-			parse_inline(l + 6, out);
+			parse_inline(trimmed + 6, out);
 			da_append_cstr(out, "</li></ul>\n");
 
-		} else if (starts_with(l, "- ")) {
-			da_append_cstr(out, "<ul><li>");
-			parse_inline(l + 2, out);
-			da_append_cstr(out, "</li></ul>\n");
-		} else if (starts_with(l, "---\n")) {
-			StringView sv = {
-				.items = (char*)(l + 4),
-				.count = md->items + md->count - (l + 4)
-			};
-			StringView needle = { .items = "---\n", .count = 4 };
-			const size_t match = sv_strstr(sv, needle);
-			if (match != sv.count) {
-				const char* end = sv.items + match;
-				l += 3;
+		} else if (starts_with(trimmed, "- ")) {
+			end_paragraph();
+			start_list();
+			da_append_cstr(out, "<li>");
+			parse_inline(trimmed + 2, out);
+			da_append_cstr(out, "</li>\n");
+
+		} else if (starts_with(trimmed, "> ")) {
+			end_paragraph();
+			da_append_cstr(out, "<blockquote>");
+			parse_inline(trimmed + 2, out);
+			da_append_cstr(out, "</blockquote>\n");
+
+		} else if (starts_with(trimmed, "```")) {
+
+			const char* code_end = strstr(trimmed+3, "```");
+			if (!code_end) code_end = md->items + md->count;
+
+			skip_after_newline(&trimmed); // skip language
+
+			da_append_cstr(out, "<pre><code>\n");
+			da_append_escape_html(out, trimmed, code_end - trimmed);
+			da_append_cstr(out, "</code></pre>\n");
+			line = code_end + 3;
+			continue;
+
+		} else if (trimmed == md->items && starts_with(trimmed, "---\n")) {
+			const char* end = strstr(trimmed+4, "---\n");
+			if (end) {
+				trimmed += 3;
 				da_append_cstr(out_fm, "<?");
-				da_append_escape_html(out_fm, l, end - l);
+				da_append_many(out_fm, trimmed, end - trimmed);
 				da_append_cstr(out_fm, "?>\n");
-				l = end + 3;
+				line = end + 3;
+				continue;
 			}
 
-		} else if (*l != '\n' && *l != '\0') {
-			if (!started_paragraph) {
-				da_append_cstr(out, "<p>");
-				parse_inline(l, out);
-				started_paragraph = true;
-			} else {
-				da_append(out, ' ');
-				parse_inline(l, out);
-
-				const char* temp = l;
-				skip_after_newline(&temp);
-				if (*temp == '\n') {
-					started_paragraph = false;
-					da_append_cstr(out, "</p>\n");
-				}
-				if (*temp == ' ' && *(temp + 1) == ' ') {
-					started_paragraph = false;
-					da_append_cstr(out, "</p>\n");
-				}
-			}
+		} else {
+			end_list();
+			start_paragraph();
+			parse_inline(trimmed, out);
+			da_append(out, '\n');
 		}
 
-		skip_after_newline(&l);
+		line = (*line_end == '\n') ? line_end + 1 : line_end;
 	}
-	if (started_paragraph) {
-		da_append_cstr(out, "</p>\n");
-		started_paragraph = false;
-	}
+
+	end_paragraph();
+	end_list();
 	da_append(out, '\0');
 	da_append(out_fm, '\0');
+
+#undef start_paragraph
+#undef   end_paragraph
+#undef start_list
+#undef   end_list
 }
 
 
@@ -794,7 +822,7 @@ void second_stage_codegen(StringBuilder* out, MitePages* pages) {
 		MitePage* mp = &pages->items[i];
 
 		da_append_cstr(out, "void render_");
-		da_append_cstr(out, mp->name);
+		da_append_cstr(out, mp->name+2);
 		da_append_cstr(out, "(StringBuilder* out) {\n");
 
 		// TODO: construct the page var
@@ -822,7 +850,7 @@ void second_stage_codegen(StringBuilder* out, MitePages* pages) {
 		MitePage* mp = &pages->items[i];
 		da_append_cstr(out, "	out.count = 0;");
 		da_append_cstr(out, "	render_");
-		da_append_cstr(out, mp->name);
+		da_append_cstr(out, mp->name+2);
 		da_append_cstr(out, "(&out);\n");
 		da_append_cstr(out, "	write_to_file(\"");
 		da_append_cstr(out, mp->final_html_path);
