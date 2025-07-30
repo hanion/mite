@@ -782,6 +782,7 @@ void second_stage_extract_header(StringBuilder* out) {
 	size_t loc = sv_strstr(SB_TO_SV(&source), delim);
 	da_append_cstr(out, "\n#define SECOND_STAGE\n\n");
 	da_append_many(out, source.items, loc);
+	free(source.items);
 }
 
 void second_stage_codegen(StringBuilder* out, MitePages* pages) {
@@ -892,6 +893,24 @@ int main(int argc, char *argv[]) {
 		printf("[done]\n");
 	} else {
 		printf("[failed]\n");
+	}
+
+	for (size_t i = 1; i < pages.count; ++i) {
+		MitePage* page = &pages.items[i];
+		free(page->md_path);
+		free(page->name);
+		free(page->mite_template);
+		free(page->final_html_path);
+		free(page->rendered_code.items);
+		free(page->front_matter.items);
+	}
+
+	for (size_t i = 0; i < template_count; ++i) {
+		MiteTemplate* t = &templates[i];
+		if (t->path) {
+			free(t->path);
+			free(t->rendered_code.items);
+		}
 	}
 
 	free(second_stage.items);
