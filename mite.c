@@ -233,14 +233,6 @@ void unusedtemp() { (void)temp_sprintf_buf; }
 #define SV(x) SVP(&(x))
 #define STR(x) CSTR((x))
 
-// hallucinations
-typedef struct {
-	const char* title;
-	const char* description;
-	const char* url;
-	const char* favicon_path;
-} SiteGlobal;
-
 typedef struct {
 	const char* title;
 	const char* date;
@@ -248,6 +240,21 @@ typedef struct {
 	const char* description;
 	const char* url;
 } SitePage;
+
+typedef struct {
+	SitePage* items;
+	size_t count;
+	size_t capacity;
+} SitePages;
+
+
+typedef struct {
+	const char* title;
+	const char* description;
+	const char* url;
+	const char* favicon_path;
+	SitePages pages;
+} SiteGlobal;
 
 
 #endif
@@ -528,9 +535,9 @@ void render_md_to_html(StringBuilder* md, StringBuilder* out, StringBuilder* out
 			start_paragraph();
 			parse_inline(&r, trimmed);
 			da_append(out, '\n');
-			if (r.cursor > line_end) continue;
 		}
 
+		if (r.cursor > line_end) continue;
 		r.cursor = (*line_end == '\n') ? line_end + 1 : line_end;
 	}
 
@@ -843,7 +850,7 @@ void second_stage_extract_header(StringBuilder* out) {
 
 void second_stage_codegen(StringBuilder* out, MitePages* pages) {
 	da_append_cstr(out,
-		"SiteGlobal global = { .title = \"hanion.dev global title\", .description = \"recreational programmer\" };\n"
+		"SiteGlobal global = { .title = \"global.title\", .description = \"global.description\" };\n"
 	);
 
 	for (size_t i = 0; i < pages->count; ++i) {
@@ -853,14 +860,13 @@ void second_stage_codegen(StringBuilder* out, MitePages* pages) {
 		da_append_cstr(out, mp->name+2);
 		da_append_cstr(out, "(StringBuilder* out) {\n");
 
-		// TODO: construct the page var
-		da_append_cstr(out, "SitePage page = { .title = \"");
-		da_append_cstr(out, mp->name);
-		da_append_cstr(out, "\", .date = \"");
-		da_append_cstr(out, "2099");
-		da_append_cstr(out, "\"};\n");
+		da_append_cstr(out, "	SitePage page = global.pages.items[");
+		static char temp_gpi_buf[10] = {0};
+		sprintf(temp_gpi_buf, "%d", (int)i);
+		da_append_cstr(out, temp_gpi_buf);
+		da_append_cstr(out, "];\n");
 
-		da_append_cstr(out, "\nprintf(\"[rendering] %s\\n\", \"");
+		da_append_cstr(out, "	printf(\"[rendering] %s\\n\", \"");
 		da_append_cstr(out, mp->final_html_path+2);
 		da_append_cstr(out, "\");\n\n");
 
@@ -869,28 +875,49 @@ void second_stage_codegen(StringBuilder* out, MitePages* pages) {
 		da_append_cstr(out, "}\n");
 	}
 
-
 	da_append_cstr(out,
-		"int main(void) {\n"
-		"	StringBuilder out = {0};\n"
+		"void construct_global_state(void) {\n"
 	);
 	for (size_t i = 0; i < pages->count; ++i) {
 		MitePage* mp = &pages->items[i];
-		da_append_cstr(out, "	out.count = 0;");
+		da_append_cstr(out, "	{\n");
+
+		da_append_cstr(out, "		SitePage page = { .date = \"0\", .url = \"");
+		da_append_cstr(out, mp->final_html_path);
+		da_append_cstr(out, "\", .title = \"");
+		da_append_cstr(out, mp->name);
+		da_append_cstr(out, "\" };\n");
+		da_append_sv(out, &mp->front_matter);
+		da_append_cstr(out, "		da_append(&global.pages, page);\n");
+
+		da_append_cstr(out, "	}\n");
+	}
+	da_append_cstr(out,
+		"}\n"
+	);
+
+	da_append_cstr(out,
+		"int main(void) {\n"
+		"	construct_global_state();\n"
+		"	StringBuilder out = {0};\n\n"
+	);
+	for (size_t i = 0; i < pages->count; ++i) {
+		MitePage* mp = &pages->items[i];
 		da_append_cstr(out, "	render_");
 		da_append_cstr(out, mp->name+2);
 		da_append_cstr(out, "(&out);\n");
 		da_append_cstr(out, "	write_to_file(\"");
 		da_append_cstr(out, mp->final_html_path);
 		da_append_cstr(out, "\", &out);\n");
+		da_append_cstr(out, "	out.count = 0;\n\n");
 	}
 
 	da_append_cstr(out,
+		"	free(out.items);\n"
 		"	return 0;\n"
 		"}"
 	);
 }
-
 
 
 int main(int argc, char *argv[]) {
@@ -906,7 +933,7 @@ int main(int argc, char *argv[]) {
 
 	MitePages pages = {0};
 
-	MitePage home = { .name = "home", .md_path = "./index.md", .final_html_path = "./index.html", .mite_template = "./index.mite" };
+	MitePage home = { .name = "./home", .md_path = "./index.md", .final_html_path = "./index.html", .mite_template = "./index.mite" };
 	da_append(&pages, home);
 
 	search_mite_pages(&pages);
