@@ -255,6 +255,12 @@ typedef struct {
 
 
 // ------------------- md2html --------------------------
+typedef struct {
+	StringBuilder* out;
+	const char* cursor;
+	bool in_paragraph;
+	bool in_list;
+} MdRenderer;
 
 void da_append_escape_html(StringBuilder* out, const char* in, size_t count) {
 	for (size_t i = 0; i < count; ++i) {
@@ -319,7 +325,7 @@ const char* word_ends_with(const char* line, const char* prefix) {
 	return end;
 }
 
-void parse_inline(const char* line, StringBuilder* out) {
+void parse_inline(MdRenderer* r, const char* line) {
 
 #define PARSE_INLINE_TAG(start, end, html_start, html_end)             \
 	else if (word_starts_with(p, start)) {                             \
@@ -328,9 +334,9 @@ void parse_inline(const char* line, StringBuilder* out) {
 		const char* tag_end = word_ends_with(p + start_len, end);      \
 		if (tag_end) {                                                 \
 			p += start_len;                                            \
-			da_append_cstr(out, html_start);                           \
-			da_append_escape_html(out, p, tag_end - p);                \
-			da_append_cstr(out, html_end);                             \
+			da_append_cstr(r->out, html_start);                        \
+			da_append_escape_html(r->out, p, tag_end - p);             \
+			da_append_cstr(r->out, html_end);                          \
 			p = tag_end + end_len;                                     \
 			continue;                                                  \
 		}                                                              \
@@ -340,7 +346,7 @@ void parse_inline(const char* line, StringBuilder* out) {
 	while (*p && *p != '\n') {
 		// double space line break
 		if (p[0] == ' ' && p[1] == ' ' && p[2] == '\n') {
-			da_append_cstr(out, "<br>\n");
+			da_append_cstr(r->out, "<br>\n");
 			p += 3;
 			break;
 		}
@@ -357,22 +363,31 @@ void parse_inline(const char* line, StringBuilder* out) {
 		else if (*p == '[') {
 			const char* end_text = search_str_until_newline(p, "]");
 			if (!end_text || end_text[1] != '(') {
-				da_append_escape_html(out, p, 1);
+				da_append_escape_html(r->out, p, 1);
 				++p;
 				continue;
 			}
 			const char* end_url = search_str_until_newline(end_text + 2, ")");
 			if (!end_url) break;
-			da_append_cstr(out, "<a href=\"");
-			da_append_many(out, end_text + 2, end_url - (end_text + 2));
-			da_append_cstr(out, "\">");
-			da_append_escape_html(out, p + 1, end_text - (p + 1));
-			da_append_cstr(out, "</a>");
+			da_append_cstr(r->out, "<a href=\"");
+			da_append_many(r->out, end_text + 2, end_url - (end_text + 2));
+			da_append_cstr(r->out, "\">");
+			da_append_escape_html(r->out, p + 1, end_text - (p + 1));
+			da_append_cstr(r->out, "</a>");
 			p = end_url + 1;
 			continue;
 		}
+		else if (starts_with(p, "<?")) {
+			const char* tag_end = strstr(p + 2, "?>");
+			if (tag_end) {
+				da_append_many(r->out, p, tag_end - p + 2);
+				p = tag_end + 2;
+				r->cursor = p;
+				continue;
+			}
+		}
 
-		da_append(out, *p);
+		da_append(r->out, *p);
 		++p;
 	}
 }
@@ -397,20 +412,18 @@ void skip_after_newline(const char** cursor) {
 }
 
 void render_md_to_html(StringBuilder* md, StringBuilder* out, StringBuilder* out_fm) {
-	const char* line = md->items;
-	bool started_paragraph = false;
-	bool started_list = false;
+	MdRenderer r = { .cursor = md->items, .out = out };
 
-#define start_paragraph() if (!started_paragraph) { da_append_cstr(out,  "<p>\n"); started_paragraph = true; }
-#define   end_paragraph() if (started_paragraph)  { da_append_cstr(out, "</p>\n"); started_paragraph = false; }
-#define start_list() if (!started_list) { da_append_cstr(out,  "<ul>\n"); started_list = true; }
-#define   end_list() if (started_list)  { da_append_cstr(out, "</ul>\n"); started_list = false; }
+#define start_paragraph() if (!r.in_paragraph) { da_append_cstr(out,  "<p>\n"); r.in_paragraph = true; }
+#define   end_paragraph() if (r.in_paragraph)  { da_append_cstr(out, "</p>\n"); r.in_paragraph = false; }
+#define start_list() if (!r.in_list) { da_append_cstr(out,  "<ul>\n"); r.in_list = true; }
+#define   end_list() if (r.in_list)  { da_append_cstr(out, "</ul>\n"); r.in_list = false; }
 
-	while (*line) {
-		const char* line_end = line;
+	while (*r.cursor) {
+		const char* line_end = r.cursor;
 		while (*line_end && *line_end != '\n') line_end++;
 
-		const char* trimmed = line;
+		const char* trimmed = r.cursor;
 		while (*trimmed == ' ' || *trimmed == '\t') trimmed++;
 
 		// empty line ends paragraph
@@ -418,11 +431,18 @@ void render_md_to_html(StringBuilder* md, StringBuilder* out, StringBuilder* out
 			end_paragraph();
 			end_list();
 
+		} else if (starts_with(trimmed, "<?")) {
+			const char* end = strstr(trimmed + 2, "?>");
+			if (end) {
+				da_append_many(out, trimmed, end - trimmed + 2);
+				r.cursor = end + 2;
+				continue;
+			}
 		
 		} else if (starts_with(trimmed, "---\n")) {
 			if (trimmed != md->items) {
 				da_append_cstr(out, "<hr>");
-				line = trimmed + 3;
+				r.cursor = trimmed + 3;
 				continue;
 			}
 
@@ -433,7 +453,7 @@ void render_md_to_html(StringBuilder* md, StringBuilder* out, StringBuilder* out
 				da_append_cstr(out_fm, "<?");
 				da_append_many(out_fm, trimmed, end - trimmed);
 				da_append_cstr(out_fm, "?>\n");
-				line = end + 3;
+				r.cursor = end + 3;
 				continue;
 			}
 
@@ -449,8 +469,8 @@ void render_md_to_html(StringBuilder* md, StringBuilder* out, StringBuilder* out
 			} else {
 				html_end_end++;
 				da_append_many(out, trimmed, html_end_end - trimmed);
-				line = html_end_end;
-				parse_inline(html_end_end, out);
+				r.cursor = html_end_end;
+				parse_inline(&r, html_end_end);
 			}
 
 		} else if (*trimmed == '#') {
@@ -464,28 +484,28 @@ void render_md_to_html(StringBuilder* md, StringBuilder* out, StringBuilder* out
 			char tag[12];
 			sprintf(tag, "h%d", level);
 			da_append(out, '<'); da_append_cstr(out, tag); da_append(out, '>');
-			parse_inline(trimmed, out);
+			parse_inline(&r, trimmed);
 			da_append_cstr(out, "</"); da_append_cstr(out, tag); da_append_cstr(out, ">\n");
 
 		} else if (starts_with(trimmed, "- [ ] ")) {
 			end_paragraph();
 			end_list();
 			da_append_cstr(out, "<ul><li><input type=\"checkbox\" disabled>");
-			parse_inline(trimmed + 6, out);
+			parse_inline(&r, trimmed + 6);
 			da_append_cstr(out, "</li></ul>\n");
 
 		} else if (starts_with(trimmed, "- ")) {
 			end_paragraph();
 			start_list();
 			da_append_cstr(out, "<li>");
-			parse_inline(trimmed + 2, out);
+			parse_inline(&r, trimmed + 2);
 			da_append_cstr(out, "</li>\n");
 
 		} else if (starts_with(trimmed, "> ")) {
 			end_paragraph();
 			end_list();
 			da_append_cstr(out, "<blockquote>");
-			parse_inline(trimmed + 2, out);
+			parse_inline(&r, trimmed + 2);
 			da_append_cstr(out, "</blockquote>\n");
 
 		} else if (starts_with(trimmed, "```")) {
@@ -500,17 +520,18 @@ void render_md_to_html(StringBuilder* md, StringBuilder* out, StringBuilder* out
 			da_append_escape_html(out, trimmed, code_end - trimmed);
 			da_append_cstr(out, "</code></pre>\n");
 
-			line = code_end + 3;
+			r.cursor = code_end + 3;
 			continue;
 
 		} else {
 			end_list();
 			start_paragraph();
-			parse_inline(trimmed, out);
+			parse_inline(&r, trimmed);
 			da_append(out, '\n');
+			if (r.cursor > line_end) continue;
 		}
 
-		line = (*line_end == '\n') ? line_end + 1 : line_end;
+		r.cursor = (*line_end == '\n') ? line_end + 1 : line_end;
 	}
 
 	end_paragraph();
@@ -921,6 +942,7 @@ int main(int argc, char *argv[]) {
 	second_stage_codegen(&second_stage, &pages);
 
 	write_to_file("site.c", &second_stage);
+	printf("[generated site.c]\n");
 
 	int result = build_and_run_site();
 	
