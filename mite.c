@@ -1,3 +1,67 @@
+/*
+ * mite
+ *
+ * minimal templated static site generator with embeddable C
+ *
+ * what it does
+ * - renders `.md` files to `.html` using `.mite` templates
+ * - templates are just C
+ * - fast, no dependencies, cross-platform
+ * - outputs plain `.html` into the same folder as the `.md`
+ *
+ * usage
+ *   $ cc -o mite mite.c && ./mite
+ *
+ * required files
+ * you only need:
+ *   mite.c         # the program
+ *   index.md       # page content
+ *   index.mite     # page template
+ * everything else is optional
+ *
+ * example structure
+ * .
+ * ├── index.md
+ * ├── index.mite
+ * ├── post/
+ * │   ├── post.mite
+ * │   ├── my-post/
+ * │   │   └── my-post.md
+ * │   └── another-post/
+ * │       └── post.md
+ * ├── project/
+ * │   ├── project.mite
+ * │   └── my-project/
+ * │       └── proj.md
+ *
+ * - if a directory has a `.mite`, it's a template directory
+ * - `.md` files in subdirectories under that are treated as pages
+ *
+ * template syntax
+ * - `.mite` files are regular HTML with embedded C between `<? ?>`
+ *   example:
+ *   <ul>
+ *   <? for (int i = 0; i < 3; ++i) { ?>
+ *     <li><? INT(i) ?></li>
+ *   <? } ?>
+ *   </ul>
+ * - code inside `<? ?>` is pasted as-is into C
+ * - macros like `INT(...)`, `STR(...)` are provided by the engine
+ *
+ * front matter
+ * - front matter is just C, e.g.:
+ *   ---
+ *   page.title = "my post title";
+ *   page.date  = "2025-12-30";
+ *   page.tags  = "math simulation";
+ *   ---
+ * - global values like `global.title` are available in templates and posts
+ *
+ * example
+ * used for https://hanion.dev, source: https://github.com/hanion/hanion.github.io
+ */
+
+
 #include <assert.h>
 #include <ctype.h>
 #include <errno.h>
@@ -421,7 +485,7 @@ void skip_after_newline(const char** cursor) {
 void render_md_to_html(StringBuilder* md, StringBuilder* out, StringBuilder* out_fm) {
 	MdRenderer r = { .cursor = md->items, .out = out };
 
-#define start_paragraph() if (!r.in_paragraph) { da_append_cstr(out,  "<p>\n"); r.in_paragraph = true; }
+#define start_paragraph() if (!r.in_paragraph) { da_append_cstr(out,  "\n<p>\n"); r.in_paragraph = true; }
 #define   end_paragraph() if (r.in_paragraph)  { da_append_cstr(out, "</p>\n"); r.in_paragraph = false; }
 #define start_list() if (!r.in_list) { da_append_cstr(out,  "<ul>\n"); r.in_list = true; }
 #define   end_list() if (r.in_list)  { da_append_cstr(out, "</ul>\n"); r.in_list = false; }
@@ -490,7 +554,7 @@ void render_md_to_html(StringBuilder* md, StringBuilder* out, StringBuilder* out
 
 			char tag[12];
 			sprintf(tag, "h%d", level);
-			da_append(out, '<'); da_append_cstr(out, tag); da_append(out, '>');
+			da_append_cstr(out, "\n<"); da_append_cstr(out, tag); da_append(out, '>');
 			parse_inline(&r, trimmed);
 			da_append_cstr(out, "</"); da_append_cstr(out, tag); da_append_cstr(out, ">\n");
 
