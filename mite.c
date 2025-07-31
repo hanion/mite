@@ -309,60 +309,82 @@ size_t sv_strstr(StringView haystack, StringView needle) {
 bool starts_with(const char* line, const char* prefix) {
 	return strncmp(line, prefix, strlen(prefix)) == 0;
 }
+bool word_starts_with(const char* line, const char* prefix) {
+	size_t len = strlen(prefix);
+	return strncmp(line, prefix, len) == 0 && isalnum(*(line+len));
+}
+const char* word_ends_with(const char* line, const char* prefix) {
+	const char* end = search_str_until_newline(line, prefix);
+	if (end && !isalnum(*(end-1))) return NULL;
+	return end;
+}
 
 void parse_inline(const char* line, StringBuilder* out) {
 	const char* p = line;
 	while (*p && *p != '\n') {
-		if (starts_with(p, "***")) {
-			p += 3;
-			const char* end = search_str_until_newline(p, "***");
-			if (!end) break;
-			da_append_cstr(out, "<strong><i>");
-			da_append_escape_html(out, p, end - p);
-			da_append_cstr(out, "</i></strong>");
-			p = end + 3;
-		} else if (starts_with(p, "_**")) {
-			p += 3;
-			const char* end = search_str_until_newline(p, "**_");
-			if (!end) break;
-			da_append_cstr(out, "<strong><i>");
-			da_append_escape_html(out, p, end - p);
-			da_append_cstr(out, "</i></strong>");
-			p = end + 3;
-		} else if (starts_with(p, "**_")) {
-			p += 3;
-			const char* end = search_str_until_newline(p, "_**");
-			if (!end) break;
-			da_append_cstr(out, "<strong><i>");
-			da_append_escape_html(out, p, end - p);
-			da_append_cstr(out, "</i></strong>");
-			p = end + 3;
-		} else if (starts_with(p, "**")) {
-			p += 2;
-			const char* end = search_str_until_newline(p, "**");
-			if (!end) break;
-			da_append_cstr(out, "<strong>");
-			da_append_escape_html(out, p, end - p);
-			da_append_cstr(out, "</strong>");
-			p = end + 2;
-		} else if (*p == '*' || *p == '_') {
-			char marker = *p++;
+		if (word_starts_with(p, "***")) {
+			const char* end = word_ends_with(p+3, "***");
+			if (end) {
+				p += 3;
+				da_append_cstr(out, "<strong><i>");
+				da_append_escape_html(out, p, end - p);
+				da_append_cstr(out, "</i></strong>");
+				p = end + 3;
+				continue;
+			}
+		} else if (word_starts_with(p, "**_")) {
+			const char* end = word_ends_with(p+3, "_**");
+			if (end) {
+				p += 3;
+				da_append_cstr(out, "<strong><i>");
+				da_append_escape_html(out, p, end - p);
+				da_append_cstr(out, "</i></strong>");
+				p = end + 3;
+				continue;
+			}
+
+		} else if (word_starts_with(p, "_**")) {
+			const char* end = word_ends_with(p+3, "**_");
+			if (end) {
+				p += 3;
+				da_append_cstr(out, "<strong><i>");
+				da_append_escape_html(out, p, end - p);
+				da_append_cstr(out, "</i></strong>");
+				p = end + 3;
+				continue;
+			}
+		} else if (word_starts_with(p, "**")) {
+			const char* end = search_str_until_newline(p+2, "**");
+			if (end && isalnum(*(end-1))) {
+				p += 2;
+				da_append_cstr(out, "<strong>");
+				da_append_escape_html(out, p, end - p);
+				da_append_cstr(out, "</strong>");
+				p = end + 2;
+				continue;
+			}
+		} else if ((*p == '*' || *p == '_') && isalnum(*(p+1)) && *(p+1) != *p) {
 			const char* end;
-			if (marker == '*') end = search_str_until_newline(p, "*");
-			if (marker == '_') end = search_str_until_newline(p, "_");
-			if (!end) break;
-			da_append_cstr(out, "<i>");
-			da_append_escape_html(out, p, end - p);
-			da_append_cstr(out, "</i>");
-			p = end + 1;
+			if (*p == '*') end = search_str_until_newline(p+1, "*");
+			if (*p == '_') end = search_str_until_newline(p+1, "_");
+			if (end) {
+				p++;
+				da_append_cstr(out, "<i>");
+				da_append_escape_html(out, p, end - p);
+				da_append_cstr(out, "</i>");
+				p = end + 1;
+				continue;
+			}
 		} else if (*p == '`') {
-			++p;
-			const char* end = search_str_until_newline(p, "`");
-			if (!end) break;
-			da_append_cstr(out, "<code>");
-			da_append_escape_html(out, p, end - p);
-			da_append_cstr(out, "</code>");
-			p = end + 1;
+			const char* end = search_str_until_newline(p+1, "`");
+			if (end) {
+				p++;
+				da_append_cstr(out, "<code>");
+				da_append_escape_html(out, p, end - p);
+				da_append_cstr(out, "</code>");
+				p = end + 1;
+				continue;
+			}
 		} else if (*p == '[') {
 			const char* end_text = search_str_until_newline(p, "]");
 			if (!end_text || end_text[1] != '(') {
@@ -378,10 +400,11 @@ void parse_inline(const char* line, StringBuilder* out) {
 			da_append_escape_html(out, p + 1, end_text - (p + 1));
 			da_append_cstr(out, "</a>");
 			p = end_url + 1;
-		} else {
-			da_append(out, *p);
-			++p;
+			continue;
 		}
+
+		da_append(out, *p);
+		++p;
 	}
 }
 
@@ -473,7 +496,6 @@ void render_md_to_html(StringBuilder* md, StringBuilder* out, StringBuilder* out
 			da_append_cstr(out, "</blockquote>\n");
 
 		} else if (starts_with(trimmed, "```")) {
-
 			const char* code_end = strstr(trimmed+3, "```");
 			if (!code_end) code_end = md->items + md->count;
 
