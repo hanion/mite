@@ -338,6 +338,13 @@ void parse_inline(const char* line, StringBuilder* out) {
 
 	const char* p = line;
 	while (*p && *p != '\n') {
+		// double space line break
+		if (p[0] == ' ' && p[1] == ' ' && p[2] == '\n') {
+			da_append_cstr(out, "<br>\n");
+			p += 3;
+			break;
+		}
+
 		if (false) {}
 		PARSE_INLINE_TAG("***", "***", "<strong><i>", "</i></strong>")
 		PARSE_INLINE_TAG("**_", "_**", "<strong><i>", "</i></strong>")
@@ -346,6 +353,7 @@ void parse_inline(const char* line, StringBuilder* out) {
 		PARSE_INLINE_TAG("*", "*", "<i>", "</i>")
 		PARSE_INLINE_TAG("_", "_", "<i>", "</i>")
 		PARSE_INLINE_TAG("`", "`", "<code>", "</code>")
+		PARSE_INLINE_TAG("\\(", "\\)", "\\(", "\\)")
 		else if (*p == '[') {
 			const char* end_text = search_str_until_newline(p, "]");
 			if (!end_text || end_text[1] != '(') {
@@ -410,8 +418,15 @@ void render_md_to_html(StringBuilder* md, StringBuilder* out, StringBuilder* out
 			end_paragraph();
 			end_list();
 
-		// frontmatter
-		} else if (trimmed == md->items && starts_with(trimmed, "---\n")) {
+		
+		} else if (starts_with(trimmed, "---\n")) {
+			if (trimmed != md->items) {
+				da_append_cstr(out, "<hr>");
+				line = trimmed + 3;
+				continue;
+			}
+
+			// frontmatter
 			const char* end = strstr(trimmed + 4, "---\n");
 			if (end) {
 				trimmed += 3;
