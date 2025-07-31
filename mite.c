@@ -613,7 +613,7 @@ void sv_to_byte_array(StringView sv, ByteArray* out) {
 void render_html_to_c(StringView source, StringBuilder* out) {
 	bool html_mode = true;
 	ByteArray ba = {0};
-	while (source.count) {
+	while (source.count && source.items[0]) {
 		if (html_mode) {
 			StringView token = sv_trim(chop_until(&source, "<?", 2));
 			sv_to_byte_array(token, &ba);
@@ -872,6 +872,11 @@ void second_stage_codegen(StringBuilder* out, MitePages* pages) {
 
 		da_append_many(out, mp->rendered_code.items, mp->rendered_code.count);
 
+		da_append_cstr(out, "	write_to_file(\"");
+		da_append_cstr(out, mp->final_html_path);
+		da_append_cstr(out, "\", out);\n");
+		da_append_cstr(out, "	out->count = 0;\n");
+
 		da_append_cstr(out, "}\n");
 	}
 
@@ -906,10 +911,6 @@ void second_stage_codegen(StringBuilder* out, MitePages* pages) {
 		da_append_cstr(out, "	render_");
 		da_append_cstr(out, mp->name+2);
 		da_append_cstr(out, "(&out);\n");
-		da_append_cstr(out, "	write_to_file(\"");
-		da_append_cstr(out, mp->final_html_path);
-		da_append_cstr(out, "\", &out);\n");
-		da_append_cstr(out, "	out.count = 0;\n\n");
 	}
 
 	da_append_cstr(out,
