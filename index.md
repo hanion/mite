@@ -1,19 +1,38 @@
 ---
-FRONT_MATTER("helo")
-TITLE("test home page")
+global.url = "https://hanion.dev";
+global.title = "hanion.dev";
+global.description = "recreational programmer";
 ---
-## md content
+## posts
 
-this is *the* **content**
+<ul class="post-list">
+<? for (int i = 0; i < global.pages.count; ++i) {
+    SitePage* p = &global.pages.items[i];
+    if ((p->date) && *(p->date) == '0') continue; ?>
 
-- 1 a
-- 2 b
+<li>
+<time datetime="<? STR(p->date); ?>"><? STR(p->date); ?></time> 
+<a href="<? STR(p->url); ?>"><? STR(p->title); ?></a>
+</li>
 
-<? STR("template in the md file") ?>
+<? } ?>
+</ul>
 
-<a>html in the md file</a>
+### <? STR("c in md") ?>
 
+<ul>
+<? for (int i = 1; i < 6; ++i) { ?>
 
-`lol`
+<? if (i == 3) { ?>
+<li><? STR(global.title) ?></li>
+<? } else { ?>
+<li><? INT(i) ?></li>
+<? } ?>
 
-end.
+<? } ?>
+</ul>
+
+## usage
+```sh
+$ cc -o mite mite.c && ./mite
+```

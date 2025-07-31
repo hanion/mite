@@ -1,0 +1,29 @@
+<!DOCTYPE html>
+<html lang="en">
+	<head>
+		<meta charset="UTF-8">
+		<title><? STR(global.title) ?></title>
+		<meta property=      "og:title" content="<? STR(global.title) ?>"/>
+		<meta name=       "description" content="<? STR(global.description) ?>"/>
+		<meta property="og:description" content="<? STR(global.description) ?>"/>
+	</head>
+
+	<body class="home">
+		<div class="wrapper">
+			<header>
+				<h1 class="home-title"><? STR(global.title) ?></h1>
+				<p class="intro"><? STR(global.description) ?></p>
+			</header>
+
+			<? CONTENT() ?>
+
+			<footer>
+				<p>
+					<a href="https://github.com/hanion">github</a> |
+					<a href="https://hanion.itch.io">itch.io</a> |
+					<a href="https://bsky.app/profile/haniondev.bsky.social">bluesky</a>
+				</p>
+			</footer>
+		</div>
+	</body>
+</html>
