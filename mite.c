@@ -297,11 +297,23 @@ void unusedtemp() { (void)temp_sprintf_buf; }
 #define STR(x) CSTR((x))
 
 typedef struct {
+	const char* key;
+	const char* value;
+} SiteMapEntry;
+
+typedef struct {
+	SiteMapEntry* items;
+	size_t count;
+	size_t capacity;
+} SiteMap;
+
+typedef struct {
 	const char* title;
 	const char* date;
 	const char* tags;
 	const char* description;
 	const char* url;
+	SiteMap data;
 } SitePage;
 
 typedef struct {
@@ -317,8 +329,79 @@ typedef struct {
 	const char* url;
 	const char* favicon_path;
 	SitePages pages;
+	SiteMap data;
 } SiteGlobal;
 
+
+void site_map_set(SiteMap* map, const char* key, const char* value) {
+	if (map->count == map->capacity) {
+		map->capacity = map->capacity ? map->capacity * 2 : 8;
+		map->items = realloc(map->items, map->capacity * sizeof(SiteMapEntry));
+	}
+	map->items[map->count].key = strdup(key);
+	map->items[map->count].value = strdup(value);
+	map->count++;
+}
+const char* site_map_get(SiteMap* map, const char* key) {
+	for (size_t i = 0; i < map->count; ++i) {
+		if (strcmp(map->items[i].key, key) == 0) {
+			return map->items[i].value;
+		}
+	}
+	return NULL;
+}
+
+bool site_map_has(SiteMap* map, const char* key) {
+	for (size_t i = 0; i < map->count; ++i) {
+		if (strcmp(map->items[i].key, key) == 0) return true;
+	}
+	return false;
+}
+
+bool site_map_equals(SiteMap* map, const char* key, const char* value) {
+	for (size_t i = 0; i < map->count; ++i) {
+		if (strcmp(map->items[i].key, key) == 0) {
+			return strcmp(map->items[i].value, value) == 0;
+		}
+	}
+	return false;
+}
+
+
+
+#define DATA_SET(obj, key, value) site_map_set(&(obj)->data, RAWSTR2(key), RAWSTR2(value));
+#define DATA_GET(obj, key)        site_map_get(&(obj)->data, RAWSTR2(key))
+#define DATA_HAS(obj, key)        site_map_has(&(obj)->data, RAWSTR2(key))
+#define DATA_IS(obj, key, value)  site_map_equals(&(obj)->data, RAWSTR2(key), RAWSTR2(value))
+
+#define GLOBAL_SET(key, value) DATA_SET(&global, key, value)
+#define GLOBAL_GET(key)        DATA_GET(&global, key)
+#define GLOBAL_HAS(key)        DATA_HAS(&global, key)
+#define GLOBAL_IS(key, value)  DATA_IS (&global, key, value)
+
+#define PAGE_SET(key, value) DATA_SET(&page, key, value)
+#define PAGE_GET(key)        DATA_GET(&page, key)
+#define PAGE_HAS(key)        DATA_HAS(&page, key)
+#define PAGE_IS(key, value)  DATA_IS (&page, key, value)
+
+void site_map_free(SiteMap* map) {
+	for (size_t i = 0; i < map->count; ++i) {
+		if (map->items[i].key)   free((char*)map->items[i].key);
+		if (map->items[i].value) free((char*)map->items[i].value);
+	}
+	if (map->items) free(map->items);
+	map->items = NULL;
+	map->count = 0;
+	map->capacity = 0;
+}
+
+void site_global_free(SiteGlobal* g) {
+	site_map_free(&g->data);
+	for (size_t i = 0; i < g->pages.count; ++i) {
+		SitePage* p = &g->pages.items[i];
+		site_map_free(&p->data);
+	}
+}
 
 #endif
 // --- SECOND STAGE END ---
@@ -926,6 +1009,28 @@ void second_stage_codegen(StringBuilder* out, MitePages* pages) {
 		"SiteGlobal global = { .title = \"global.title\", .description = \"global.description\" };\n"
 	);
 
+	da_append_cstr(out,
+		"void construct_global_state(void) {\n"
+	);
+	for (size_t i = 0; i < pages->count; ++i) {
+		MitePage* mp = &pages->items[i];
+		da_append_cstr(out, "	{\n");
+
+		da_append_cstr(out, "		SitePage page = { .date = \"0\", .url = \"");
+		da_append_cstr(out, (mp->final_html_path+1)); // +1 removes the . in the path
+		da_append_cstr(out, "\", .title = \"");
+		da_append_cstr(out, mp->name);
+		da_append_cstr(out, "\" };\n");
+		da_append_sv(out, &mp->front_matter);
+		da_append_cstr(out, "		da_append(&global.pages, page);\n");
+
+		da_append_cstr(out, "	}\n");
+	}
+	da_append_cstr(out,
+		"}\n"
+	);
+
+
 	for (size_t i = 0; i < pages->count; ++i) {
 		MitePage* mp = &pages->items[i];
 
@@ -937,7 +1042,7 @@ void second_stage_codegen(StringBuilder* out, MitePages* pages) {
 		static char temp_gpi_buf[10] = {0};
 		sprintf(temp_gpi_buf, "%d", (int)i);
 		da_append_cstr(out, temp_gpi_buf);
-		da_append_cstr(out, "];\n");
+		da_append_cstr(out, "];(void)page;\n");
 
 		da_append_cstr(out, "	printf(\"[rendering] %s\\n\", \"");
 		da_append_cstr(out, mp->final_html_path+2);
@@ -954,27 +1059,6 @@ void second_stage_codegen(StringBuilder* out, MitePages* pages) {
 	}
 
 	da_append_cstr(out,
-		"void construct_global_state(void) {\n"
-	);
-	for (size_t i = 0; i < pages->count; ++i) {
-		MitePage* mp = &pages->items[i];
-		da_append_cstr(out, "	{\n");
-
-		da_append_cstr(out, "		SitePage page = { .date = \"0\", .url = \"");
-		da_append_cstr(out, mp->final_html_path);
-		da_append_cstr(out, "\", .title = \"");
-		da_append_cstr(out, mp->name);
-		da_append_cstr(out, "\" };\n");
-		da_append_sv(out, &mp->front_matter);
-		da_append_cstr(out, "		da_append(&global.pages, page);\n");
-
-		da_append_cstr(out, "	}\n");
-	}
-	da_append_cstr(out,
-		"}\n"
-	);
-
-	da_append_cstr(out,
 		"int main(void) {\n"
 		"	construct_global_state();\n"
 		"	StringBuilder out = {0};\n\n"
@@ -987,6 +1071,7 @@ void second_stage_codegen(StringBuilder* out, MitePages* pages) {
 	}
 
 	da_append_cstr(out,
+		"	site_global_free(&global);\n"
 		"	free(out.items);\n"
 		"	return 0;\n"
 		"}"
