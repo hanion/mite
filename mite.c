@@ -29,13 +29,12 @@
  * │   │   └── my-post.md
  * │   └── another-post/
  * │       └── post.md
- * ├── project/
- * │   ├── project.mite
- * │   └── my-project/
- * │       └── proj.md
+ * └── archive/
+ *    ├── archive.mite
+ *    └── archive.md
  *
  * - if a directory has a `.mite`, it's a template directory
- * - `.md` files in subdirectories under that are treated as pages
+ * - `.md` files in it and subdirectories under that are treated as pages
  *
  * template syntax
  * - `.mite` files are regular HTML with embedded C between `<? ?>`
@@ -552,7 +551,7 @@ void render_md_to_html(StringBuilder* md, StringBuilder* out, StringBuilder* out
 			while (*trimmed == '#') { level++; trimmed++; }
 			while (*trimmed == ' ') trimmed++;
 
-			char tag[12];
+			char tag[16];
 			sprintf(tag, "h%d", level);
 			da_append_cstr(out, "\n<"); da_append_cstr(out, tag); da_append(out, '>');
 			parse_inline(&r, trimmed);
@@ -818,6 +817,11 @@ void search_mite_pages(MitePages* pages) {
 		if (!dir) continue;
 
 		while ((subentry = readdir(dir)) != NULL) {
+			if (subentry->d_type == DT_REG) {
+				if (is_md_file(subentry->d_name)) {
+					handle_md_file(pages, mite_path, dir_path, subentry->d_name);
+				}
+			}
 			if (subentry->d_type != DT_DIR) continue;
 			if (strcmp(subentry->d_name, ".") == 0 || strcmp(subentry->d_name, "..") == 0)
 				continue;
@@ -872,7 +876,12 @@ void search_mite_pages(MitePages* pages) {
 		if (h_child == INVALID_HANDLE_VALUE) continue;
 
 		do {
-			if (!(child_data.dwFileAttributes & FILE_ATTRIBUTE_DIRECTORY)) continue;
+			if (!(child_data.dwFileAttributes & FILE_ATTRIBUTE_DIRECTORY)) {
+				if (is_md_file(child_data.cFileName)) {
+					handle_md_file(pages, mite_path, dir_path, child_data.cFileName);
+				}
+				continue;
+			}
 			if (strcmp(child_data.cFileName, ".") == 0 || strcmp(child_data.cFileName, "..") == 0) continue;
 
 			char post_dir[MAX_PATH];

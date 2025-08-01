@@ -39,14 +39,13 @@ everything else is optional
 │   │   └── my-post.md
 │   └── another-post/
 │       └── post.md
-├── project/
-│   ├── project.mite
-│   └── my-project/
-│       └── proj.md
+└── archive/
+    ├── archive.mite
+    └── archive.md
 ```
 
 - if a directory has a `.mite`, it's a template directory
-- `.md` files in subdirectories under that are treated as pages
+- `.md` files in it and subdirectories under that are treated as pages
 
 ## template syntax
 
