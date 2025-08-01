@@ -338,8 +338,8 @@ void site_map_set(SiteMap* map, const char* key, const char* value) {
 		map->capacity = map->capacity ? map->capacity * 2 : 8;
 		map->items = realloc(map->items, map->capacity * sizeof(SiteMapEntry));
 	}
-	map->items[map->count].key = strdup(key);
-	map->items[map->count].value = strdup(value);
+	map->items[map->count].key = key;
+	map->items[map->count].value = value;
 	map->count++;
 }
 const char* site_map_get(SiteMap* map, const char* key) {
@@ -383,25 +383,6 @@ bool site_map_equals(SiteMap* map, const char* key, const char* value) {
 #define PAGE_GET(key)        DATA_GET(&page, key)
 #define PAGE_HAS(key)        DATA_HAS(&page, key)
 #define PAGE_IS(key, value)  DATA_IS (&page, key, value)
-
-void site_map_free(SiteMap* map) {
-	for (size_t i = 0; i < map->count; ++i) {
-		if (map->items[i].key)   free((char*)map->items[i].key);
-		if (map->items[i].value) free((char*)map->items[i].value);
-	}
-	if (map->items) free(map->items);
-	map->items = NULL;
-	map->count = 0;
-	map->capacity = 0;
-}
-
-void site_global_free(SiteGlobal* g) {
-	site_map_free(&g->data);
-	for (size_t i = 0; i < g->pages.count; ++i) {
-		SitePage* p = &g->pages.items[i];
-		site_map_free(&p->data);
-	}
-}
 
 #endif
 // --- SECOND STAGE END ---
@@ -1071,7 +1052,6 @@ void second_stage_codegen(StringBuilder* out, MitePages* pages) {
 	}
 
 	da_append_cstr(out,
-		"	site_global_free(&global);\n"
 		"	free(out.items);\n"
 		"	return 0;\n"
 		"}"
