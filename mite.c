@@ -153,6 +153,16 @@ static inline int build_and_run_site() {
 #endif
 }
 
+static inline void cleanup_site() {
+#ifndef _WIN32
+	remove("site.c");
+	remove("site");
+#else
+	DeleteFileA("site.c");
+	DeleteFileA("site.exe");
+#endif
+}
+
 
 bool read_entire_file(const char* filepath_cstr, StringBuilder* sb) {
 	bool result = true;
@@ -1058,8 +1068,16 @@ void second_stage_codegen(StringBuilder* out, MitePages* pages) {
 	);
 }
 
+void print_usage(const char* prog) {
+	printf("usage: %s [options]\n", prog);
+	printf("options:\n");
+	printf("  -h, --help       show this help message\n");
+	printf("  --first-stage    only generate site.c, do not compile or run\n");
+	printf("  --keep           keep the generated site.c file\n");
+}
 
-int main(int argc, char *argv[]) {
+
+int main(int argc, char** argv) {
 	if (!file_exists("index.mite")) {
 		fprintf(stderr, "[error] missing 'index.mite'\n");
 		return 1;
@@ -1068,6 +1086,23 @@ int main(int argc, char *argv[]) {
 	if (!file_exists("index.md")) {
 		fprintf(stderr, "[error] missing 'index.md'\n");
 		return 1;
+	}
+
+	bool arg_first_stage = false;
+	bool arg_keep = false;
+	for (int i = 1; i < argc; ++i) {
+		if (strcmp(argv[i], "--help") == 0 || strcmp(argv[i], "-h") == 0) {
+			print_usage(argv[0]);
+			return 0;
+		} else if (strcmp(argv[i], "--first-stage") == 0) {
+			arg_first_stage = true;
+		} else if (strcmp(argv[i], "--keep") == 0) {
+			arg_keep = true;
+		} else {
+			fprintf(stderr, "unknown option: %s\n", argv[i]);
+			print_usage(argv[0]);
+			return 1;
+		}
 	}
 
 	MitePages pages = {0};
@@ -1108,9 +1143,16 @@ int main(int argc, char *argv[]) {
 	second_stage_codegen(&second_stage, &pages);
 
 	write_to_file("site.c", &second_stage);
-	printf("[generated site.c]\n");
+	printf("[generated] site\n");
 
-	int result = build_and_run_site();
+	int result = 0;
+
+	if (!arg_first_stage) {
+		result = build_and_run_site();
+		if (!arg_keep) {
+			cleanup_site();
+		}
+	}
 	
 	if (result == 0) {
 		printf("[done]\n");
@@ -1127,6 +1169,9 @@ int main(int argc, char *argv[]) {
 		free(page->rendered_code.items);
 		free(page->front_matter.items);
 	}
+	free(pages.items[0].rendered_code.items);
+	free(pages.items[0].front_matter.items);
+	free(pages.items);
 
 	for (size_t i = 0; i < template_count; ++i) {
 		MiteTemplate* t = &templates[i];
