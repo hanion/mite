@@ -76,7 +76,7 @@
 	do {                                                                                           \
 		if ((expected_capacity) > (da)->capacity) {                                                \
 			if ((da)->capacity == 0) {                                                             \
-				(da)->capacity = 256;                                                              \
+				(da)->capacity = 128;                                                              \
 			}                                                                                      \
 			while ((expected_capacity) > (da)->capacity) {                                         \
 				(da)->capacity *= 2;                                                               \
@@ -149,7 +149,7 @@ static inline int build_and_run_site() {
 #ifndef _WIN32
 	return execute_line("cc -o site site.c && ./site");
 #else
-	return execute_line("cl /Fe:site.exe site.c && site.exe");
+	return execute_line("gcc -o site.exe site.c && site.exe");
 #endif
 }
 
@@ -319,15 +319,15 @@ typedef struct {
 
 typedef struct {
 	const char* title;
-	const char* date;
-	const char* tags;
 	const char* description;
 	const char* url;
+	const char* date;
+	const char* tags;
 	SiteMap data;
 } SitePage;
 
 typedef struct {
-	SitePage* items;
+	SitePage** items;
 	size_t count;
 	size_t capacity;
 } SitePages;
@@ -339,8 +339,38 @@ typedef struct {
 	const char* url;
 	const char* favicon_path;
 	SitePages pages;
+
+	// custom data
+	SitePages posts;
+	SitePages projects;
+	SitePages socials;
 	SiteMap data;
 } SiteGlobal;
+
+SitePage* find_page(SitePages* pages, const char* url) {
+	for (size_t i = 0; i < pages->count; ++i) {
+		if (!pages->items[i]) continue;
+		if (!pages->items[i]->url) continue;
+		if (0 == strcmp(pages->items[i]->url, url)) return pages->items[i];
+	}
+	return NULL;
+}
+
+SitePage* site_page_new() {
+	return calloc(1, sizeof(SitePage));
+}
+SitePage* site_page_new_tdu(const char* title, const char* desc, const char* url) {
+	SitePage* p = site_page_new();
+	p->title = title;
+	p->description = desc;
+	p->url = url;
+	return p;
+}
+
+#define ADD_PROJECT(t, d, u) da_append(&global.projects, site_page_new_tdu((t),(d),(u)));
+#define ADD_SOCIAL(t, u)     da_append(&global.socials,  site_page_new_tdu((t),NULL,(u)));
+
+#define ADD_TO_GLOBAL_POSTS(page) da_append(&global.posts, (page));
 
 
 void site_map_set(SiteMap* map, const char* key, const char* value) {
@@ -379,20 +409,35 @@ bool site_map_equals(SiteMap* map, const char* key, const char* value) {
 
 
 
-#define DATA_SET(obj, key, value) site_map_set(&(obj)->data, RAWSTR2(key), RAWSTR2(value));
-#define DATA_GET(obj, key)        site_map_get(&(obj)->data, RAWSTR2(key))
-#define DATA_HAS(obj, key)        site_map_has(&(obj)->data, RAWSTR2(key))
-#define DATA_IS(obj, key, value)  site_map_equals(&(obj)->data, RAWSTR2(key), RAWSTR2(value))
+#define DATA_SET(obj, key, value) site_map_set(&((obj)->data), (key), (value));
+#define DATA_GET(obj, key)        site_map_get(&((obj)->data), (key))
+#define DATA_HAS(obj, key)        site_map_has(&((obj)->data), (key))
+#define DATA_IS(obj, key, value)  site_map_equals(&((obj)->data), (key), (value))
 
 #define GLOBAL_SET(key, value) DATA_SET(&global, key, value)
 #define GLOBAL_GET(key)        DATA_GET(&global, key)
 #define GLOBAL_HAS(key)        DATA_HAS(&global, key)
 #define GLOBAL_IS(key, value)  DATA_IS (&global, key, value)
 
-#define PAGE_SET(key, value) DATA_SET(&page, key, value)
-#define PAGE_GET(key)        DATA_GET(&page, key)
-#define PAGE_HAS(key)        DATA_HAS(&page, key)
-#define PAGE_IS(key, value)  DATA_IS (&page, key, value)
+#define PAGE_SET(key, value) DATA_SET(page, key, value)
+#define PAGE_GET(key)        DATA_GET(page, key)
+#define PAGE_HAS(key)        DATA_HAS(page, key)
+#define PAGE_IS(key, value)  DATA_IS (page, key, value)
+
+void sort_pages(SitePages* sp) {
+	for (size_t i = 0; i < sp->count; ++i) {
+		for (size_t j = i + 1; j < sp->count; ++j) {
+			if (!sp->items[i] || !sp->items[j]) continue;
+			if (!sp->items[i]->date || !sp->items[j]->date) continue;
+			if (strcmp(sp->items[i]->date, sp->items[j]->date) < 0) {
+				SitePage* tmp = sp->items[i];
+				sp->items[i] = sp->items[j];
+				sp->items[j] = tmp;
+			}
+		}
+	}
+}
+
 
 #endif
 // --- SECOND STAGE END ---
@@ -1007,11 +1052,11 @@ void second_stage_codegen(StringBuilder* out, MitePages* pages) {
 		MitePage* mp = &pages->items[i];
 		da_append_cstr(out, "	{\n");
 
-		da_append_cstr(out, "		SitePage page = { .date = \"0\", .url = \"");
-		da_append_cstr(out, (mp->final_html_path+1)); // +1 removes the . in the path
-		da_append_cstr(out, "\", .title = \"");
+		da_append_cstr(out, "		SitePage* page = site_page_new_tdu(\"");
 		da_append_cstr(out, mp->name);
-		da_append_cstr(out, "\" };\n");
+		da_append_cstr(out, "\", \"0\", \"");
+		da_append_cstr(out, (mp->final_html_path+1)); // +1 removes the . in the path
+		da_append_cstr(out, "\");\n");
 		da_append_sv(out, &mp->front_matter);
 		da_append_cstr(out, "		da_append(&global.pages, page);\n");
 
@@ -1029,11 +1074,9 @@ void second_stage_codegen(StringBuilder* out, MitePages* pages) {
 		da_append_cstr(out, mp->name+2);
 		da_append_cstr(out, "(StringBuilder* out) {\n");
 
-		da_append_cstr(out, "	SitePage page = global.pages.items[");
-		static char temp_gpi_buf[10] = {0};
-		sprintf(temp_gpi_buf, "%d", (int)i);
-		da_append_cstr(out, temp_gpi_buf);
-		da_append_cstr(out, "];(void)page;\n");
+		da_append_cstr(out, "	SitePage* page = find_page(&global.pages, \"");
+		da_append_cstr(out, (mp->final_html_path+1)); // +1 removes the . in the path
+		da_append_cstr(out, "\");(void)page;");
 
 		da_append_cstr(out, "	printf(\"[rendering] %s\\n\", \"");
 		da_append_cstr(out, mp->final_html_path+2);

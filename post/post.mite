@@ -2,7 +2,7 @@
 <html lang="en">
 	<head>
 		<meta charset="UTF-8">
-		<title><? STR(page.title) ?></title>
+		<title><? STR(page->title) ?></title>
 	</head>
 	<body>
 		<div class="wrapper">
@@ -14,10 +14,10 @@
 
 
 			<header>
-				<h1><? STR(page.title) ?></h1>
-				<p class="date"><? STR(page.date) ?></p>
+				<h1><? STR(page->title) ?></h1>
+				<p class="date"><? STR(page->date) ?></p>
 				<p class="tags">
-					<? STR(page.tags) ?>
+					<? STR(page->tags) ?>
 				</p>
 			</header>
 
