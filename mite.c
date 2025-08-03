@@ -268,6 +268,7 @@ static inline StringView chop_until(StringView* input, const char* delim, const 
 
 
 typedef struct {
+	char* name;
 	char* path;
 	StringBuilder rendered_code;
 } MiteTemplate;
@@ -277,7 +278,8 @@ typedef struct {
 	char* md_path;
 	char* final_html_path;
 
-	char* mite_template;
+	char* mite_template_path;
+	MiteTemplate* mite_template;
 
 	StringBuilder rendered_code;
 	StringBuilder front_matter;
@@ -288,6 +290,12 @@ typedef struct {
 	size_t count;
 	size_t capacity;
 } MitePages;
+
+typedef struct {
+	MiteTemplate* items;
+	size_t count;
+	size_t capacity;
+} MiteTemplates;
 
 
 
@@ -305,6 +313,8 @@ void unusedtemp() { (void)temp_sprintf_buf; }
 #define SVP(x) da_append_many(out, (x)->items, (x)->count);
 #define SV(x) SVP(&(x))
 #define STR(x) CSTR((x))
+
+#define CONTENT() render_page_content_func(out, page);
 
 typedef struct {
 	const char* key;
@@ -346,6 +356,9 @@ typedef struct {
 	SitePages socials;
 	SiteMap data;
 } SiteGlobal;
+
+typedef void (*render_page_content_func_t)(StringBuilder* out, SitePage* page);
+
 
 SitePage* find_page(SitePages* pages, const char* url) {
 	for (size_t i = 0; i < pages->count; ++i) {
@@ -698,6 +711,19 @@ void render_md_to_html(StringBuilder* md, StringBuilder* out, StringBuilder* out
 			da_append_cstr(out, "</blockquote>\n");
 
 		} else if (starts_with(trimmed, "```")) {
+			if (trimmed == md->items) {
+				// frontmatter
+				const char* end = strstr(trimmed + 4, "```\n");
+				if (end) {
+					skip_after_newline(&trimmed);
+					da_append_cstr(out_fm, "<?");
+					da_append_many(out_fm, trimmed, end - trimmed);
+					da_append_cstr(out_fm, "?>\n");
+					r.cursor = end + 3;
+					continue;
+				}
+			}
+
 			end_paragraph();
 			end_list();
 
@@ -823,8 +849,8 @@ bool render_mite_layout(MiteTemplate* mite) {
 	return true;
 }
 
-bool apply_template(MiteTemplate* mite_template, MitePage* mite_page) {
-	if (!file_exists(mite_template->path) || !file_exists(mite_page->md_path)) return false;
+bool render_page(MitePage* mite_page) {
+	if (!file_exists(mite_page->md_path)) return false;
 
 	StringBuilder md = {0};
 	if (!read_entire_file(mite_page->md_path, &md)) return false;
@@ -834,22 +860,74 @@ bool apply_template(MiteTemplate* mite_template, MitePage* mite_page) {
 	StringBuilder raw_fm = {0};
 	render_md_to_html(&md, &raw_html, &raw_fm);
 
-	StringBuilder content = {0};
-	render_html_to_c(SB_TO_SV(&raw_html), &content);
+	render_html_to_c(SB_TO_SV(&raw_html), &mite_page->rendered_code);
 	render_html_to_c(SB_TO_SV(&raw_fm), &mite_page->front_matter);
-
-	if (mite_template->rendered_code.count == 0) {
-		if (!render_mite_layout(mite_template)) return false;
-	}
-	mite_page->rendered_code = print_content_into_layout(&mite_template->rendered_code, &content);
 
 	free(md.items);
 	free(raw_html.items);
 	free(raw_fm.items);
-	free(content.items);
 
 	return true;
 }
+
+void render_all(MitePages* pages, MiteTemplates* templates) {
+	for (size_t i = 0; i < templates->count; ++i) {
+		MiteTemplate* mt = &templates->items[i];
+		printf("[mite] %s\n", mt->path+2);
+		if (!render_mite_layout(mt)) {
+			printf("failed to render mite layout: %s\n", mt->name);
+			exit(1);
+		}
+	}
+	for (size_t i = 0; i < pages->count; ++i) {
+		MitePage* mp = &pages->items[i];
+		printf("[page] %s\n", mp->md_path+2);
+		if (!render_page(mp)) {
+			printf("failed to render page: %s\n", mp->name);
+			exit(1);
+		}
+	}
+}
+
+MiteTemplate* create_template(MiteTemplates* templates, const char* path) {
+	da_append(templates, (MiteTemplate){0});
+	MiteTemplate* mt = &templates->items[templates->count-1];
+
+	mt->path = strdup(path);
+	mt->name = strdup(mt->path+2);
+	size_t len = strlen(mt->name);
+	if (len > 3 && strcmp(mt->name + len - 3, ".md") == 0) {
+		len -= 3;
+	}
+	mt->name[len] = '\0';
+	for (size_t i = 0; i < len; ++i) {
+		if (!isalnum(mt->name[i])) {
+			mt->name[i] = '_';
+		}
+	}
+	return mt;
+}
+
+void create_templates_to_pages(MitePages* pages, MiteTemplates* templates) {
+	for (size_t i = 0; i < pages->count; ++i) {
+		MitePage* page = &pages->items[i];
+
+		MiteTemplate* mite_template = NULL;
+		for (size_t i = 0; i < templates->count; ++i) {
+			if (!templates->items[i].path) continue;
+			if (0 == strcmp(page->mite_template_path, templates->items[i].path)) {
+				mite_template = &templates->items[i];
+				break;
+			}
+		}
+
+		if (!mite_template) {
+			mite_template = create_template(templates, page->mite_template_path);
+		}
+		page->mite_template = mite_template;
+	}
+}
+
 
 
 bool ends_with(const char* name, const char* ext) {
@@ -893,7 +971,7 @@ void handle_md_file(MitePages* pages, const char* template_path, const char* md_
 	mp.final_html_path = calloc(MAX_PATH_LEN, sizeof(md_dir));
 	join_path(mp.final_html_path, md_dir, "index.html");
 
-	mp.mite_template = strdup(template_path);
+	mp.mite_template_path = strdup(template_path);
 
 	da_append(pages, mp);
 }
@@ -1040,9 +1118,9 @@ void second_stage_extract_header(StringBuilder* out) {
 	free(source.items);
 }
 
-void second_stage_codegen(StringBuilder* out, MitePages* pages) {
+void second_stage_codegen(StringBuilder* out, MitePages* pages, MiteTemplates* templates) {
 	da_append_cstr(out,
-		"SiteGlobal global = { .title = \"global.title\", .description = \"global.description\" };\n"
+		"SiteGlobal global = { .title = \"!!!global!title!!!\", .description = \"!!!global!description!!!\" };\n"
 	);
 
 	da_append_cstr(out,
@@ -1066,28 +1144,27 @@ void second_stage_codegen(StringBuilder* out, MitePages* pages) {
 		"}\n"
 	);
 
+	for (size_t i = 0; i < templates->count; ++i) {
+		MiteTemplate* mt = &templates->items[i];
+
+		da_append_cstr(out, "void render_template_");
+		da_append_cstr(out, mt->name);
+		da_append_cstr(out, "(StringBuilder* out, SitePage* page, render_page_content_func_t render_page_content_func) {\n");
+
+		da_append_many(out, mt->rendered_code.items, mt->rendered_code.count);
+
+		da_append_cstr(out, "}\n");
+	}
+
 
 	for (size_t i = 0; i < pages->count; ++i) {
 		MitePage* mp = &pages->items[i];
 
 		da_append_cstr(out, "void render_");
 		da_append_cstr(out, mp->name+2);
-		da_append_cstr(out, "(StringBuilder* out) {\n");
-
-		da_append_cstr(out, "	SitePage* page = find_page(&global.pages, \"");
-		da_append_cstr(out, (mp->final_html_path+1)); // +1 removes the . in the path
-		da_append_cstr(out, "\");(void)page;");
-
-		da_append_cstr(out, "	printf(\"[rendering] %s\\n\", \"");
-		da_append_cstr(out, mp->final_html_path+2);
-		da_append_cstr(out, "\");\n\n");
+		da_append_cstr(out, "(StringBuilder* out, SitePage* page) {\n");
 
 		da_append_many(out, mp->rendered_code.items, mp->rendered_code.count);
-
-		da_append_cstr(out, "	write_to_file(\"");
-		da_append_cstr(out, mp->final_html_path);
-		da_append_cstr(out, "\", out);\n");
-		da_append_cstr(out, "	out->count = 0;\n");
 
 		da_append_cstr(out, "}\n");
 	}
@@ -1097,11 +1174,34 @@ void second_stage_codegen(StringBuilder* out, MitePages* pages) {
 		"	construct_global_state();\n"
 		"	StringBuilder out = {0};\n\n"
 	);
+
 	for (size_t i = 0; i < pages->count; ++i) {
 		MitePage* mp = &pages->items[i];
-		da_append_cstr(out, "	render_");
+		MiteTemplate* mt = mp->mite_template;
+
+		da_append_cstr(out, "	{\n");
+
+		da_append_cstr(out, "		printf(\"[rendering] ");
+		da_append_cstr(out, mp->final_html_path+2);
+		da_append_cstr(out, "\\n\");\n");
+
+		da_append_cstr(out, "		SitePage* page = find_page(&global.pages, \"");
+		da_append_cstr(out, (mp->final_html_path+1)); // +1 removes the . in the path
+		da_append_cstr(out, "\");\n");
+
+		da_append_cstr(out, "		render_template_");
+		da_append_cstr(out, mt->name);
+		da_append_cstr(out, "(&out, page, render_");
 		da_append_cstr(out, mp->name+2);
-		da_append_cstr(out, "(&out);\n");
+		da_append_cstr(out, ");\n");
+
+		da_append_cstr(out, "		write_to_file(\"");
+		da_append_cstr(out, mp->final_html_path);
+		da_append_cstr(out, "\", &out);\n");
+		da_append_cstr(out, "		out.count = 0;\n");
+
+
+		da_append_cstr(out, "	}\n");
 	}
 
 	da_append_cstr(out,
@@ -1149,41 +1249,18 @@ int main(int argc, char** argv) {
 	}
 
 	MitePages pages = {0};
+	MiteTemplates templates = {0};
 
-	MitePage home = { .name = "./home", .md_path = "./index.md", .final_html_path = "./index.html", .mite_template = "./index.mite" };
+	MitePage home = { .name = "./home", .md_path = "./index.md", .final_html_path = "./index.html", .mite_template_path = "./index.mite" };
 	da_append(&pages, home);
 
 	search_mite_pages(&pages);
-
-	MiteTemplate templates[24] = {0};
-	size_t template_count = 0;
-
-	for (size_t i = 0; i < pages.count; ++i) {
-		MitePage* page = &pages.items[i];
-
-		MiteTemplate* mite_template = NULL;
-		for (size_t i = 0; i < template_count; ++i) {
-			if (templates[i].path && 0 == strcmp(page->mite_template, templates[i].path)) {
-				mite_template = &templates[i];
-				break;
-			}
-		}
-
-		if (!mite_template) {
-			mite_template = &templates[template_count++];
-			mite_template->path = strdup(page->mite_template);
-		}
-
-		printf("[templating] %s\n", page->md_path+2);
-// 		printf("[templating] %s\n          -> %s\n          w/ %s\n\n",
-// 			page->md_path, page->final_html_path, page->mite_template);
-
-		apply_template(mite_template, page);
-	}
+	create_templates_to_pages(&pages, &templates);
+	render_all(&pages, &templates);
 
 	StringBuilder second_stage = {0};
 	second_stage_extract_header(&second_stage);
-	second_stage_codegen(&second_stage, &pages);
+	second_stage_codegen(&second_stage, &pages, &templates);
 
 	write_to_file("site.c", &second_stage);
 	printf("[generated] site\n");
@@ -1207,7 +1284,7 @@ int main(int argc, char** argv) {
 		MitePage* page = &pages.items[i];
 		free(page->md_path);
 		free(page->name);
-		free(page->mite_template);
+		free(page->mite_template_path);
 		free(page->final_html_path);
 		free(page->rendered_code.items);
 		free(page->front_matter.items);
@@ -1216,14 +1293,17 @@ int main(int argc, char** argv) {
 	free(pages.items[0].front_matter.items);
 	free(pages.items);
 
-	for (size_t i = 0; i < template_count; ++i) {
-		MiteTemplate* t = &templates[i];
+
+	for (size_t i = 0; i < templates.count; ++i) {
+		MiteTemplate* t = &templates.items[i];
 		if (t->path) {
+			free(t->name);
 			free(t->path);
 			free(t->rendered_code.items);
 		}
 	}
 
+	free(templates.items);
 	free(second_stage.items);
 	return result;
 }
