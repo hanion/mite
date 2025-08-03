@@ -50,9 +50,9 @@
  * front matter
  * - front matter is just C, e.g.:
  *   ---
- *   page.title = "my post title";
- *   page.date  = "2025-12-30";
- *   page.tags  = "math simulation";
+ *   page->title = "my post title";
+ *   page->date  = "2025-12-30";
+ *   page->tags  = "math simulation";
  *   ---
  * - global values like `global.title` are available in templates and posts
  *
