@@ -156,6 +156,14 @@ static inline int build_and_run_site() {
 #endif
 }
 
+static const char* mite_rebuild_line() {
+#ifndef _WIN32
+	return "cc -o mite mite.c && ./mite";
+#else
+	return "gcc -o mite.exe mite.c && mite.exe";
+#endif
+}
+
 static inline void cleanup_site() {
 #ifndef _WIN32
 	remove("site.c");
@@ -1293,6 +1301,8 @@ void print_usage(const char* prog) {
 	printf("  -h, --help       show this help message\n");
 	printf("  --first-stage    only generate site.c, do not compile or run\n");
 	printf("  --keep           keep the generated site.c file\n");
+	printf("  --serve          serve the site with 'python -m http.server'\n");
+	printf("  --rebuild        rebuild mite before running\n");
 }
 
 
@@ -1300,6 +1310,7 @@ int main(int argc, char** argv) {
 	bool arg_first_stage = false;
 	bool arg_keep = false;
 	bool arg_serve = false;
+	bool arg_rebuild = false;
 	for (int i = 1; i < argc; ++i) {
 		if (strcmp(argv[i], "--help") == 0 || strcmp(argv[i], "-h") == 0) {
 			print_usage(argv[0]);
@@ -1310,11 +1321,30 @@ int main(int argc, char** argv) {
 			arg_keep = true;
 		} else if (strcmp(argv[i], "--serve") == 0) {
 			arg_serve = true;
+		} else if (strcmp(argv[i], "--rebuild") == 0) {
+			arg_rebuild = true;
 		} else {
 			fprintf(stderr, "unknown option: %s\n", argv[i]);
 			print_usage(argv[0]);
 			return 1;
 		}
+	}
+
+	if (arg_rebuild) {
+		printf("[rebuilding]\n");
+		char* line = strdup(mite_rebuild_line());
+		char buf[4096];
+		snprintf(buf, sizeof(buf), "%s", line);
+
+		for (int i = 1; i < argc; ++i) {
+			if (strcmp(argv[i], "--rebuild") != 0) {
+				strncat(buf, " ", sizeof(buf) - strlen(buf) - 1);
+				strncat(buf, argv[i], sizeof(buf) - strlen(buf) - 1);
+			}
+		}
+
+		free(line);
+		return execute_line(buf);
 	}
 
 	MitePages pages = {0};
