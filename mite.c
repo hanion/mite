@@ -60,6 +60,9 @@
  * used for https://hanion.dev, source: https://github.com/hanion/hanion.github.io
  */
 
+#define LAYOUT_DIR "./layout"
+#define INCLUDE_DIR "./include"
+#define DEFAULT_PAGE_LAYOUT "default"
 
 #include <assert.h>
 #include <ctype.h>
@@ -290,15 +293,13 @@ typedef struct {
 	char* name;
 	char* path;
 	StringBuilder rendered_code;
+	bool is_include;
 } MiteTemplate;
 
 typedef struct {
 	char* name;
 	char* md_path;
 	char* final_html_path;
-
-	char* mite_template_path;
-	MiteTemplate* mite_template;
 
 	StringBuilder rendered_code;
 	StringBuilder front_matter;
@@ -334,6 +335,8 @@ void unusedtemp() { (void)temp_sprintf_buf; }
 #define STR(x) CSTR((x))
 
 #define CONTENT() render_page_content_func(out, page);
+#define INCLUDE(mitename) do { SiteTemplate* st = find_template(&global.templates, (mitename)); \
+							if (st && st->is_include) st->function(out, page, render_page_content_func); } while(0);
 
 typedef struct {
 	const char* key;
@@ -352,6 +355,7 @@ typedef struct {
 	const char* url;
 	const char* date;
 	const char* tags;
+	const char* layout;
 	SiteMap data;
 } SitePage;
 
@@ -362,12 +366,29 @@ typedef struct {
 } SitePages;
 
 
+typedef void (*render_page_content_func_t)(StringBuilder* out, SitePage* page);
+typedef void (*render_template_func_t)(StringBuilder* out, SitePage* page, render_page_content_func_t render_page_content_func);
+
+typedef struct {
+	const char* name;
+	render_template_func_t function;
+	bool is_include;
+} SiteTemplate;
+
+typedef struct {
+	SiteTemplate* items;
+	size_t count;
+	size_t capacity;
+} SiteTemplates;
+
+
 typedef struct {
 	const char* title;
 	const char* description;
 	const char* url;
 	const char* favicon_path;
 	SitePages pages;
+	SiteTemplates templates;
 
 	// custom data
 	SitePages posts;
@@ -376,7 +397,7 @@ typedef struct {
 	SiteMap data;
 } SiteGlobal;
 
-typedef void (*render_page_content_func_t)(StringBuilder* out, SitePage* page);
+
 
 
 SitePage* find_page(SitePages* pages, const char* url) {
@@ -385,6 +406,14 @@ SitePage* find_page(SitePages* pages, const char* url) {
 		if (!pages->items[i]->url) continue;
 		if (0 == strcmp(pages->items[i]->url, url)) return pages->items[i];
 	}
+	return NULL;
+}
+SiteTemplate* find_template(SiteTemplates* templates, const char* name) {
+	for (size_t i = 0; i < templates->count; ++i) {
+		if (!templates->items[i].name) continue;
+		if (0 == strcmp(templates->items[i].name, name)) return &templates->items[i];
+	}
+	fprintf(stderr,"[error] template '%s' not found!\n", name);
 	return NULL;
 }
 
@@ -396,6 +425,7 @@ SitePage* site_page_new_tdu(const char* title, const char* desc, const char* url
 	p->title = title;
 	p->description = desc;
 	p->url = url;
+	p->layout = DEFAULT_PAGE_LAYOUT;
 	return p;
 }
 
@@ -930,26 +960,6 @@ MiteTemplate* create_template(MiteTemplates* templates, const char* path) {
 	return mt;
 }
 
-void create_templates_to_pages(MitePages* pages, MiteTemplates* templates) {
-	for (size_t i = 0; i < pages->count; ++i) {
-		MitePage* page = &pages->items[i];
-
-		MiteTemplate* mite_template = NULL;
-		for (size_t i = 0; i < templates->count; ++i) {
-			if (!templates->items[i].path) continue;
-			if (0 == strcmp(page->mite_template_path, templates->items[i].path)) {
-				mite_template = &templates->items[i];
-				break;
-			}
-		}
-
-		if (!mite_template) {
-			mite_template = create_template(templates, page->mite_template_path);
-		}
-		page->mite_template = mite_template;
-	}
-}
-
 
 
 bool ends_with(const char* name, const char* ext) {
@@ -972,33 +982,46 @@ void join_path(char* out, const char* a, const char* b) {
 }
 
 
-void handle_md_file(MitePages* pages, const char* template_path, const char* md_dir, const char* md_name) {
-	MitePage mp = {0};
+void register_mite_file(MiteTemplates* templates, const char* mite_dir, const char* mite_name, bool is_include) {
+	da_append(templates, (MiteTemplate){0});
+	MiteTemplate* mt = &templates->items[templates->count-1];
 
-	mp.md_path = calloc(MAX_PATH_LEN, sizeof(md_dir));
-	join_path(mp.md_path, md_dir, md_name);
+	mt->path = calloc(MAX_PATH_LEN, sizeof(mite_dir));
+	join_path(mt->path, mite_dir, mite_name);
 
-	mp.name = strdup(mp.md_path);
-	size_t len = strlen(mp.name);
-	if (len > 3 && strcmp(mp.name + len - 3, ".md") == 0) {
+	mt->name = strdup(mite_name);
+	size_t len = strlen(mt->name);
+	if (len > 5 && strcmp(mt->name + len - 5, ".mite") == 0) {
+		mt->name[len-5] = '\0';
+	}
+
+	mt->is_include = is_include;
+}
+void register_md_file(MitePages* pages, const char* md_dir, const char* md_name) {
+	da_append(pages, (MitePage){0});
+	MitePage* mp = &pages->items[pages->count-1];
+
+	mp->md_path = calloc(MAX_PATH_LEN, sizeof(md_dir));
+	join_path(mp->md_path, md_dir, md_name);
+
+	mp->name = strdup(mp->md_path+2);
+	size_t len = strlen(mp->name);
+	if (len > 3 && strcmp(mp->name + len - 3, ".md") == 0) {
 		len -= 3;
 	}
-	mp.name[len] = '\0';
+	mp->name[len] = '\0';
 	for (size_t i = 0; i < len; ++i) {
-		if (!isalnum(mp.name[i])) {
-			mp.name[i] = '_';
+		if (!isalnum(mp->name[i])) {
+			mp->name[i] = '_';
 		}
 	}
 
-	mp.final_html_path = calloc(MAX_PATH_LEN, sizeof(md_dir));
-	join_path(mp.final_html_path, md_dir, "index.html");
-
-	mp.mite_template_path = strdup(template_path);
-
-	da_append(pages, mp);
+	mp->final_html_path = calloc(MAX_PATH_LEN, sizeof(md_dir));
+	join_path(mp->final_html_path, md_dir, "index.html");
 }
 
-void search_mite_pages(MitePages* pages) {
+
+void search_files(MitePages* pages, MiteTemplates* templates) {
 #ifndef _WIN32
 	DIR* root = opendir(".");
 	if (!root) return;
@@ -1006,62 +1029,55 @@ void search_mite_pages(MitePages* pages) {
 	struct dirent* entry;
 
 	while ((entry = readdir(root)) != NULL) {
-		if (entry->d_type != DT_DIR) continue;
-		if (strcmp(entry->d_name, ".") == 0 || strcmp(entry->d_name, "..") == 0)
+		if (entry->d_type != DT_DIR && entry->d_type != DT_REG) continue;
+		if (strcmp(entry->d_name, ".") == 0 || strcmp(entry->d_name, "..") == 0) continue;
+
+		// index.md
+		if (entry->d_type == DT_REG && (0 == strcmp(entry->d_name, "index.md"))) {
+			register_md_file(pages, ".", "index.md");
 			continue;
-
-		char dir_path[MAX_PATH_LEN];
-		join_path(dir_path, ".", entry->d_name);
-
-		DIR* dir = opendir(dir_path);
-		if (!dir) continue;
-
-		int has_mite = 0;
-		char mite_path[MAX_PATH_LEN];
-		struct dirent* subentry = NULL;
-
-		while ((subentry = readdir(dir)) != NULL) {
-			if (subentry->d_type != DT_REG) continue;
-			if (is_mite_file(subentry->d_name)) {
-				has_mite = 1;
-				join_path(mite_path, ".", entry->d_name);
-				join_path(mite_path, mite_path, subentry->d_name);
-				break;
-			}
 		}
-		closedir(dir);
-		if (!has_mite) continue;
 
-		dir = opendir(dir_path);
-		if (!dir) continue;
+		if (entry->d_type != DT_DIR) continue;
 
-		while ((subentry = readdir(dir)) != NULL) {
+		int dir_type = 1;
+		if (strcmp(entry->d_name, "layout") == 0)  dir_type = 2;
+		if (strcmp(entry->d_name, "include") == 0) dir_type = 3;
+
+		char subdir_path[MAX_PATH_LEN];
+		join_path(subdir_path, ".", entry->d_name);
+
+		DIR* subdir = opendir(subdir_path);
+		if (!subdir) continue;
+
+		struct dirent* subentry;
+		while ((subentry = readdir(subdir)) != NULL) {
+			if (subentry->d_type != DT_REG && subentry->d_type != DT_DIR) continue;
+			if (strcmp(subentry->d_name, ".") == 0 || strcmp(subentry->d_name, "..") == 0) continue;
+
+			char path[MAX_PATH_LEN];
+			join_path(path, subdir_path, subentry->d_name);
+
 			if (subentry->d_type == DT_REG) {
-				if (is_md_file(subentry->d_name)) {
-					handle_md_file(pages, mite_path, dir_path, subentry->d_name);
-				}
+				if (dir_type == 1 && is_md_file(subentry->d_name)) register_md_file(pages, subdir_path, subentry->d_name);
+				if (dir_type > 1 && is_mite_file(subentry->d_name)) register_mite_file(templates, subdir_path, subentry->d_name, dir_type == 3);
 			}
-			if (subentry->d_type != DT_DIR) continue;
-			if (strcmp(subentry->d_name, ".") == 0 || strcmp(subentry->d_name, "..") == 0)
-				continue;
 
-			char child_dir[MAX_PATH_LEN];
-			join_path(child_dir, dir_path, subentry->d_name);
-
-			DIR* post_dir = opendir(child_dir);
-			if (!post_dir) continue;
-
-			struct dirent* post_entry;
-			while ((post_entry = readdir(post_dir)) != NULL) {
-				if (post_entry->d_type != DT_REG) continue;
-				if (is_md_file(post_entry->d_name)) {
-					handle_md_file(pages, mite_path, child_dir, post_entry->d_name);
-					break;
+			// content
+			if (dir_type == 1 && subentry->d_type == DT_DIR) {
+				DIR* subsub = opendir(path);
+				if (!subsub) continue;
+				struct dirent* f;
+				while ((f = readdir(subsub)) != NULL) {
+					if (f->d_type != DT_REG) continue;
+					if (is_md_file(f->d_name)) {
+						register_md_file(pages, path, f->d_name);
+					}
 				}
+				closedir(subsub);
 			}
-			closedir(post_dir);
 		}
-		closedir(dir);
+		closedir(subdir);
 	}
 	closedir(root);
 #else
@@ -1070,60 +1086,64 @@ void search_mite_pages(MitePages* pages) {
 	if (h_find == INVALID_HANDLE_VALUE) return;
 
 	do {
+		const char* name = find_data.cFileName;
+		if (strcmp(name, ".") == 0 || strcmp(name, "..") == 0) continue;
+
+		// index.md
+		if (!(find_data.dwFileAttributes & FILE_ATTRIBUTE_DIRECTORY) && (0 == strcmp(name, "index.md"))) {
+			register_md_file(pages, ".", "index.md");
+			continue;
+		}
+
 		if (!(find_data.dwFileAttributes & FILE_ATTRIBUTE_DIRECTORY)) continue;
-		if (strcmp(find_data.cFileName, ".") == 0 || strcmp(find_data.cFileName, "..") == 0) continue;
 
-		char dir_path[MAX_PATH];
-		join_path(dir_path, ".", find_data.cFileName);
+		int dir_type = 1;
+		if (strcmp(name, "layout") == 0)  dir_type = 2;
+		if (strcmp(name, "include") == 0) dir_type = 3;
 
-		char mite_search[MAX_PATH];
-		join_path(mite_search, dir_path, "*.mite");
+		char subdir_path[MAX_PATH];
+		join_path(subdir_path, ".", name);
 
-		WIN32_FIND_DATAA mite_data;
-		HANDLE h_mite = FindFirstFileA(mite_search, &mite_data);
-		if (h_mite == INVALID_HANDLE_VALUE) continue;
+		char sub_search[MAX_PATH];
+		join_path(sub_search, subdir_path, "*");
 
-		char mite_path[MAX_PATH];
-		join_path(mite_path, dir_path, mite_data.cFileName);
-		FindClose(h_mite);
-
-		char child_search[MAX_PATH];
-		join_path(child_search, dir_path, "*");
-
-		WIN32_FIND_DATAA child_data;
-		HANDLE h_child = FindFirstFileA(child_search, &child_data);
-		if (h_child == INVALID_HANDLE_VALUE) continue;
+		WIN32_FIND_DATAA subentry;
+		HANDLE h_sub = FindFirstFileA(sub_search, &subentry);
+		if (h_sub == INVALID_HANDLE_VALUE) continue;
 
 		do {
-			if (!(child_data.dwFileAttributes & FILE_ATTRIBUTE_DIRECTORY)) {
-				if (is_md_file(child_data.cFileName)) {
-					handle_md_file(pages, mite_path, dir_path, child_data.cFileName);
-				}
-				continue;
+			const char* subname = subentry.cFileName;
+			if (strcmp(subname, ".") == 0 || strcmp(subname, "..") == 0) continue;
+
+			char path[MAX_PATH];
+			join_path(path, subdir_path, subname);
+
+			if (!(subentry.dwFileAttributes & FILE_ATTRIBUTE_DIRECTORY)) {
+				if (dir_type == 1 && is_md_file(subname)) register_md_file(pages, subdir_path, subname);
+				if (dir_type > 1 && is_mite_file(subname)) register_mite_file(templates, subdir_path, subname, dir_type == 3);
 			}
-			if (strcmp(child_data.cFileName, ".") == 0 || strcmp(child_data.cFileName, "..") == 0) continue;
 
-			char post_dir[MAX_PATH];
-			join_path(post_dir, dir_path, child_data.cFileName);
+			// content
+			if (dir_type == 1 && (subentry.dwFileAttributes & FILE_ATTRIBUTE_DIRECTORY)) {
+				char subsub_path[MAX_PATH];
+				join_path(subsub_path, subdir_path, subname);
 
-			char md_pattern[MAX_PATH];
-			join_path(md_pattern, post_dir, "*.md");
+				char subsub_search[MAX_PATH];
+				join_path(subsub_search, subsub_path, "*");
 
-			WIN32_FIND_DATAA md_data;
-			HANDLE h_md = FindFirstFileA(md_pattern, &md_data);
-			if (h_md != INVALID_HANDLE_VALUE) {
-				do {
-					if (!(md_data.dwFileAttributes & FILE_ATTRIBUTE_DIRECTORY)) {
-						if (is_md_file(md_data.cFileName)) {
-							handle_md_file(pages, mite_path, post_dir, md_data.cFileName);
-							break;
+				WIN32_FIND_DATAA f;
+				HANDLE h_f = FindFirstFileA(subsub_search, &f);
+				if (h_f != INVALID_HANDLE_VALUE) {
+					do {
+						if (!(f.dwFileAttributes & FILE_ATTRIBUTE_DIRECTORY) && is_md_file(f.cFileName)) {
+							register_md_file(pages, subsub_path, f.cFileName);
 						}
-					}
-				} while (FindNextFileA(h_md, &md_data));
-				FindClose(h_md);
+					} while (FindNextFileA(h_f, &f));
+					FindClose(h_f);
+				}
 			}
-		} while (FindNextFileA(h_child, &child_data));
-		FindClose(h_child);
+		} while (FindNextFileA(h_sub, &subentry));
+		FindClose(h_sub);
 	} while (FindNextFileA(h_find, &find_data));
 	FindClose(h_find);
 #endif
@@ -1157,8 +1177,9 @@ void second_stage_codegen(StringBuilder* out, MitePages* pages, MiteTemplates* t
 		da_append_cstr(out, "\", \"0\", \"");
 		da_append_cstr(out, (mp->final_html_path+1)); // +1 removes the . in the path
 		da_append_cstr(out, "\");\n");
-		da_append_sv(out, &mp->front_matter);
 		da_append_cstr(out, "		da_append(&global.pages, page);\n");
+
+		da_append_sv(out, &mp->front_matter);
 
 		da_append_cstr(out, "	}\n");
 	}
@@ -1179,11 +1200,39 @@ void second_stage_codegen(StringBuilder* out, MitePages* pages, MiteTemplates* t
 	}
 
 
+	da_append_cstr(out,
+		"void construct_templates(void) {\n"
+	);
+	for (size_t i = 0; i < templates->count; ++i) {
+		MiteTemplate* mt = &templates->items[i];
+
+		da_append_cstr(out,
+			"	{\n"
+			"		da_append(&global.templates, (SiteTemplate){0});\n"
+			"		SiteTemplate* st = &global.templates.items[global.templates.count-1];\n"
+			"		st->name = \""
+		);
+		da_append_cstr(out, mt->name);
+		da_append_cstr(out, "\";\n"
+			"		st->function = render_template_"
+		);
+		da_append_cstr(out, mt->name);
+		da_append_cstr(out, ";\n"
+			"		st->is_include = "
+		);
+		da_append_cstr(out, mt->is_include ? "1": "0");
+		da_append_cstr(out, ";\n\t}\n");
+	}
+	da_append_cstr(out,
+		"}\n"
+	);
+
+
 	for (size_t i = 0; i < pages->count; ++i) {
 		MitePage* mp = &pages->items[i];
 
 		da_append_cstr(out, "void render_");
-		da_append_cstr(out, mp->name+2);
+		da_append_cstr(out, mp->name);
 		da_append_cstr(out, "(StringBuilder* out, SitePage* page) {\n");
 
 		da_append_many(out, mp->rendered_code.items, mp->rendered_code.count);
@@ -1194,12 +1243,12 @@ void second_stage_codegen(StringBuilder* out, MitePages* pages, MiteTemplates* t
 	da_append_cstr(out,
 		"int main(void) {\n"
 		"	construct_global_state();\n"
+		"	construct_templates();\n"
 		"	StringBuilder out = {0};\n\n"
 	);
 
 	for (size_t i = 0; i < pages->count; ++i) {
 		MitePage* mp = &pages->items[i];
-		MiteTemplate* mt = mp->mite_template;
 
 		da_append_cstr(out, "	{\n");
 
@@ -1211,10 +1260,12 @@ void second_stage_codegen(StringBuilder* out, MitePages* pages, MiteTemplates* t
 		da_append_cstr(out, (mp->final_html_path+1)); // +1 removes the . in the path
 		da_append_cstr(out, "\");\n");
 
-		da_append_cstr(out, "		render_template_");
-		da_append_cstr(out, mt->name);
+		da_append_cstr(out, "		SiteTemplate* st = find_template(&global.templates, page->layout);\n");
+
+
+		da_append_cstr(out, "		st->function");
 		da_append_cstr(out, "(&out, page, render_");
-		da_append_cstr(out, mp->name+2);
+		da_append_cstr(out, mp->name);
 		da_append_cstr(out, ");\n");
 
 		da_append_cstr(out, "		write_to_file(\"");
@@ -1243,16 +1294,6 @@ void print_usage(const char* prog) {
 
 
 int main(int argc, char** argv) {
-	if (!file_exists("index.mite")) {
-		fprintf(stderr, "[error] missing 'index.mite'\n");
-		return 1;
-	}
-
-	if (!file_exists("index.md")) {
-		fprintf(stderr, "[error] missing 'index.md'\n");
-		return 1;
-	}
-
 	bool arg_first_stage = false;
 	bool arg_keep = false;
 	bool arg_serve = false;
@@ -1276,11 +1317,8 @@ int main(int argc, char** argv) {
 	MitePages pages = {0};
 	MiteTemplates templates = {0};
 
-	MitePage home = { .name = "./home", .md_path = "./index.md", .final_html_path = "./index.html", .mite_template_path = "./index.mite" };
-	da_append(&pages, home);
+	search_files(&pages, &templates);
 
-	search_mite_pages(&pages);
-	create_templates_to_pages(&pages, &templates);
 	render_all(&pages, &templates);
 
 	StringBuilder second_stage = {0};
@@ -1309,7 +1347,6 @@ int main(int argc, char** argv) {
 		MitePage* page = &pages.items[i];
 		free(page->md_path);
 		free(page->name);
-		free(page->mite_template_path);
 		free(page->final_html_path);
 		free(page->rendered_code.items);
 		free(page->front_matter.items);

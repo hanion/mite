@@ -7,7 +7,6 @@
 		<meta name=       "description" content="<? STR(global.description) ?>"/>
 		<meta property="og:description" content="<? STR(global.description) ?>"/>
 	</head>
-
 	<body class="home">
 		<div class="wrapper">
 			<header>
@@ -17,13 +16,7 @@
 
 			<? CONTENT() ?>
 
-			<footer>
-				<p>
-					<a href="https://github.com/hanion">github</a> |
-					<a href="https://hanion.itch.io">itch.io</a> |
-					<a href="https://bsky.app/profile/haniondev.bsky.social">bluesky</a>
-				</p>
-			</footer>
+			<? INCLUDE("footer") ?>
 		</div>
 	</body>
 </html>

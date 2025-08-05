@@ -1,7 +1,9 @@
----
+```c
 global.url = "https://hanion.dev";
 global.title = "hanion.dev";
 global.description = "recreational programmer";
+
+page->layout = "home";
 
 ADD_PROJECT("project1", "desc1", "/project/project1_url");
 ADD_PROJECT("project2", "desc2", "/project/project2_url");
@@ -9,7 +11,7 @@ ADD_PROJECT("project2", "desc2", "/project/project2_url");
 ADD_SOCIAL("github", "https://github.com/user");
 ADD_SOCIAL("bluesky", "https://bsky.app/profile/user");
 ADD_SOCIAL("linkedin", "https://linkedin.com/user");
----
+```
 
 <? if (global.posts.count > 0) { ?>
 ## posts
