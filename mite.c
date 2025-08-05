@@ -1255,6 +1255,7 @@ int main(int argc, char** argv) {
 
 	bool arg_first_stage = false;
 	bool arg_keep = false;
+	bool arg_serve = false;
 	for (int i = 1; i < argc; ++i) {
 		if (strcmp(argv[i], "--help") == 0 || strcmp(argv[i], "-h") == 0) {
 			print_usage(argv[0]);
@@ -1263,6 +1264,8 @@ int main(int argc, char** argv) {
 			arg_first_stage = true;
 		} else if (strcmp(argv[i], "--keep") == 0) {
 			arg_keep = true;
+		} else if (strcmp(argv[i], "--serve") == 0) {
+			arg_serve = true;
 		} else {
 			fprintf(stderr, "unknown option: %s\n", argv[i]);
 			print_usage(argv[0]);
@@ -1327,6 +1330,13 @@ int main(int argc, char** argv) {
 
 	free(templates.items);
 	free(second_stage.items);
+
+	if (result == 0 && arg_serve) {
+		printf("[serving]\n");
+		execute_line("python -m http.server");
+		printf("[done]\n");
+	}
+
 	return result;
 }
 
