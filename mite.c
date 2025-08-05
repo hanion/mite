@@ -414,6 +414,7 @@ SiteTemplate* find_template(SiteTemplates* templates, const char* name) {
 		if (0 == strcmp(templates->items[i].name, name)) return &templates->items[i];
 	}
 	fprintf(stderr,"[error] template '%s' not found!\n", name);
+	exit(1);
 	return NULL;
 }
 
@@ -1234,6 +1235,8 @@ void second_stage_codegen(StringBuilder* out, MitePages* pages, MiteTemplates* t
 		da_append_cstr(out, "void render_");
 		da_append_cstr(out, mp->name);
 		da_append_cstr(out, "(StringBuilder* out, SitePage* page) {\n");
+		da_append_cstr(out, "	render_page_content_func_t render_page_content_func = NULL;\n");
+
 
 		da_append_many(out, mp->rendered_code.items, mp->rendered_code.count);
 
