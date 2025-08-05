@@ -233,6 +233,25 @@ static inline StringView sv_trim(StringView input) {
 
 	return sv;
 }
+static inline StringView sv_trim_empty_lines(StringView input) {
+	StringView sv = input;
+
+	int empty = 0;
+	while (empty < sv.count && (sv.items[empty] == ' ' || sv.items[empty] == '\t')) empty++;
+
+	if (empty+1 < sv.count && sv.items[empty+1] == '\n') {
+		sv.items += empty;
+		sv.count -= empty;
+	}
+
+
+	int r = sv.count - 1;
+	while (r >= 0 && (sv.items[r] == ' ' || sv.items[r] == '\t' || sv.items[r] == '\n')) r--;
+	sv.count = r + 1;
+
+	return sv;
+}
+
 
 static inline StringView chop_until(StringView* input, const char* delim, const size_t delim_count) {
     StringView line = {0};
@@ -799,6 +818,9 @@ typedef struct {
 
 void byte_array_to_c_code(ByteArray* ba, StringBuilder* out) {
 	if (ba->count == 0) return;
+	if (ba->count == 1 && ba->string.count == 4) {
+		if (0 == strncmp(ba->string.items, "\\x0a", 4)) return;
+	}
 	da_append_cstr(out, "OUT_HTML(\"");
 	static char buffer[16] = {0};
 	da_append_many(out, ba->string.items, ba->string.count);
@@ -823,7 +845,7 @@ void render_html_to_c(StringView source, StringBuilder* out) {
 	ByteArray ba = {0};
 	while (source.count && source.items[0]) {
 		if (html_mode) {
-			StringView token = sv_trim(chop_until(&source, "<?", 2));
+			StringView token = sv_trim_empty_lines(chop_until(&source, "<?", 2));
 			sv_to_byte_array(token, &ba);
 			byte_array_to_c_code(&ba, out);
 			ba.count = 0;
