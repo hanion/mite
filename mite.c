@@ -192,14 +192,6 @@ static inline int build_and_run_site() {
 #endif
 }
 
-static const char* mite_rebuild_line() {
-#ifndef _WIN32
-	return "cc -o mite mite.c && ./mite";
-#else
-	return "gcc -o mite.exe mite.c && mite.exe";
-#endif
-}
-
 static inline void cleanup_site() {
 #ifndef _WIN32
 	remove("site.c");
@@ -1169,9 +1161,9 @@ void search_files(MitePages* pages, MiteTemplates* templates) {
 }
 
 
-void second_stage_extract_header(StringBuilder* out) {
+void second_stage_extract_header(StringBuilder* out, const char* source_path) {
 	StringBuilder source = {0};
-	if (!read_entire_file("mite.c", &source)) exit(1);
+	if (!read_entire_file(source_path, &source)) exit(1);
 	StringView delim = { .items = "// --- SECOND STAGE END ---", .count = 27 };
 	size_t loc = sv_strstr(SB_TO_SV(&source), delim);
 	da_append_cstr(out, "\n#define SECOND_STAGE\n\n");
@@ -1312,7 +1304,7 @@ void print_usage(const char* prog) {
 	printf("  --first-stage    only generate site.c, do not compile or run\n");
 	printf("  --keep           keep the generated site.c file\n");
 	printf("  --serve          serve the site with 'python -m http.server'\n");
-	printf("  --rebuild        rebuild mite before running\n");
+	printf("  --source         path to mite.c source file (default: ./mite.c or /usr/share/mite/mite.c)\n");
 }
 
 
@@ -1320,7 +1312,8 @@ int main(int argc, char** argv) {
 	bool arg_first_stage = false;
 	bool arg_keep = false;
 	bool arg_serve = false;
-	bool arg_rebuild = false;
+	const char* mite_source_path = NULL;
+
 	for (int i = 1; i < argc; ++i) {
 		if (strcmp(argv[i], "--help") == 0 || strcmp(argv[i], "-h") == 0) {
 			print_usage(argv[0]);
@@ -1331,8 +1324,8 @@ int main(int argc, char** argv) {
 			arg_keep = true;
 		} else if (strcmp(argv[i], "--serve") == 0) {
 			arg_serve = true;
-		} else if (strcmp(argv[i], "--rebuild") == 0) {
-			arg_rebuild = true;
+		} else if ((strcmp(argv[i], "--source") == 0) && i + 1 < argc) {
+			mite_source_path = argv[++i];
 		} else {
 			fprintf(stderr, "unknown option: %s\n", argv[i]);
 			print_usage(argv[0]);
@@ -1340,21 +1333,23 @@ int main(int argc, char** argv) {
 		}
 	}
 
-	if (arg_rebuild) {
-		printf("[rebuilding]\n");
-		char* line = strdup(mite_rebuild_line());
-		char buf[4096];
-		snprintf(buf, sizeof(buf), "%s", line);
-
-		for (int i = 1; i < argc; ++i) {
-			if (strcmp(argv[i], "--rebuild") != 0) {
-				strncat(buf, " ", sizeof(buf) - strlen(buf) - 1);
-				strncat(buf, argv[i], sizeof(buf) - strlen(buf) - 1);
-			}
+	if (!mite_source_path) {
+		if (file_exists("./mite.c")) {
+			mite_source_path = "./mite.c";
+		} else if (file_exists("/usr/share/mite/mite.c")) {
+			mite_source_path = "/usr/share/mite/mite.c";
+		} else {
+			fprintf(stderr, "[error] mite.c source not found.\n\tplease provide it with --source option.\n");
+			return 1;
 		}
-
-		free(line);
-		return execute_line(buf);
+	}
+	if (strlen(mite_source_path) < 3) {
+		print_usage(argv[0]);
+		return 1;
+	}
+	if (!file_exists(mite_source_path)) {
+		fprintf(stderr, "[error] file '%s' not found.\n", mite_source_path);
+		return 1;
 	}
 
 	MitePages pages = {0};
@@ -1365,7 +1360,7 @@ int main(int argc, char** argv) {
 	render_all(&pages, &templates);
 
 	StringBuilder second_stage = {0};
-	second_stage_extract_header(&second_stage);
+	second_stage_extract_header(&second_stage, mite_source_path);
 	second_stage_codegen(&second_stage, &pages, &templates);
 
 	write_to_file("site.c", &second_stage);
