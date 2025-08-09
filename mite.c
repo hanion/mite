@@ -1185,7 +1185,7 @@ void second_stage_codegen(StringBuilder* out, MitePages* pages, MiteTemplates* t
 
 		da_append_cstr(out, "		SitePage* page = site_page_new_tdu(\"");
 		da_append_cstr(out, mp->name);
-		da_append_cstr(out, "\", \"0\", \"");
+		da_append_cstr(out, "\", NULL, \"");
 		da_append_cstr(out, (mp->final_html_path+1)); // +1 removes the . in the path
 		da_append_cstr(out, "\");\n");
 		da_append_cstr(out, "		da_append(&global.pages, page);\n");
