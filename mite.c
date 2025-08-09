@@ -1,63 +1,99 @@
 /*
- * mite
- *
- * minimal templated static site generator with embeddable C
- *
- * what it does
- * - renders `.md` files to `.html` using `.mite` templates
- * - templates are just C
- * - fast, no dependencies, cross-platform
- * - outputs plain `.html` into the same folder as the `.md`
- *
- * usage
- *   $ cc -o mite mite.c && ./mite
- *
- * required files
- * you only need:
- *   mite.c         # the program
- *   index.md       # page content
- *   index.mite     # page template
- * everything else is optional
- *
- * example structure
- * .
- * ├── index.md
- * ├── index.mite
- * ├── post/
- * │   ├── post.mite
- * │   ├── my-post/
- * │   │   └── my-post.md
- * │   └── another-post/
- * │       └── post.md
- * └── archive/
- *    ├── archive.mite
- *    └── archive.md
- *
- * - if a directory has a `.mite`, it's a template directory
- * - `.md` files in it and subdirectories under that are treated as pages
- *
- * template syntax
- * - `.mite` files are regular HTML with embedded C between `<? ?>`
- *   example:
- *   <ul>
- *   <? for (int i = 0; i < 3; ++i) { ?>
- *     <li><? INT(i) ?></li>
- *   <? } ?>
- *   </ul>
- * - code inside `<? ?>` is pasted as-is into C
- * - macros like `INT(...)`, `STR(...)` are provided by the engine
- *
- * front matter
- * - front matter is just C, e.g.:
- *   ---
- *   page->title = "my post title";
- *   page->date  = "2025-12-30";
- *   page->tags  = "math simulation";
- *   ---
- * - global values like `global.title` are available in templates and posts
- *
- * example
- * used for https://hanion.dev, source: https://github.com/hanion/hanion.github.io
+
+# mite
+MInimal TEmplated static site generator with C templates
+
+## what it does
+- renders `.md` files to `.html` using `.mite` templates
+- templates are just C
+- fast, no dependencies, cross-platform
+- outputs plain `.html` into the same folder as the `.md`
+
+## usage
+$ cc -o mite mite.c && ./mite
+
+## example structure
+> This repository matches this structure and includes real working examples
+
+.
+├── mite.c
+├── index.md
+├── layout/
+│   ├── home.mite
+│   └── post.mite
+├── include/
+│   ├── head.mite
+│   └── footer.mite
+└── post/
+    ├── my-post/
+    │   └── my-post.md
+    └── another-post/
+        └── post.md
+
+## layout and includes
+- templates go in `layout/`
+- reusable parts go in `include/`
+- all `.mite` files in both are globally available
+- any of them can call `<? CONTENT() ?>`
+
+to use a layout for a page, set the layout name in its front matter:
+	page->layout = "post";
+
+to include a template:
+	<? INCLUDE("footer") ?>
+
+## template syntax
+`.mite` files are regular HTML with embedded C between `<? ?>`
+
+```html
+<ul>
+<? for (int i = 0; i < 3; ++i) { ?>
+	<li><? INT(i) ?></li>
+<? } ?>
+</ul>
+```
+
+- code inside `<? ?>` is pasted as-is into C
+- `INT(...)`, `STR(...)`, etc. are macros provided by the engine
+
+## front matter
+---
+page->layout = "post";
+page->title  = "my post title";
+page->date   = "2025-12-30";
+page->tags   = "math simulation";
+---
+
+- front matter is just C
+- you can access `page->` and `global.` in templates
+
+## custom data
+you can set custom key/value data (`const char *`) using:
+PAGE_SET(key, value);
+GLOBAL_SET(key, value);
+
+then access it with:
+PAGE_GET(key)        // returns char* or NULL
+PAGE_HAS(key)        // true if key exists
+PAGE_IS(key, value)  // strcmp values
+
+### custom data example
+- `post/bezier_curves/bezier_curves.md`
+---
+page->layout = "post";
+page->title  = "Bézier curves";
+PAGE_SET("mathjax", "true");
+---
+
+- `include/head.mite`
+<? if (PAGE_IS("mathjax", "true")) { ?>
+	<!-- Load MathJax -->
+<? } ?>
+
+## real world use
+used for https://hanion.dev
+source: https://github.com/hanion/hanion.github.io
+
  */
 
 #define LAYOUT_DIR "./layout"
@@ -228,106 +264,7 @@ bool write_to_file(const char* filepath_cstr, StringBuilder* sb) {
 	return true;
 }
 
-static inline StringView sv_trim(StringView input) {
-	StringView sv = input;
-
-	int l = 0;
-	while (l < sv.count && (sv.items[l] == ' ' || sv.items[l] == '\t' || sv.items[l] == '\n')) l++;
-
-	sv.items += l;
-	sv.count -= l;
-
-	int r = sv.count - 1;
-	while (r >= 0 && (sv.items[r] == ' ' || sv.items[r] == '\t' || sv.items[r] == '\n')) r--;
-
-	sv.count = r + 1;
-
-	return sv;
-}
-static inline StringView sv_trim_empty_lines(StringView input) {
-	StringView sv = input;
-
-	int empty = 0;
-	while (empty < sv.count && (sv.items[empty] == ' ' || sv.items[empty] == '\t')) empty++;
-
-	if (empty+1 < sv.count && sv.items[empty+1] == '\n') {
-		sv.items += empty;
-		sv.count -= empty;
-	}
-
-
-	int r = sv.count - 1;
-	while (r >= 0 && (sv.items[r] == ' ' || sv.items[r] == '\t' || sv.items[r] == '\n')) r--;
-	sv.count = r + 1;
-
-	return sv;
-}
-
-
-static inline StringView chop_until(StringView* input, const char* delim, const size_t delim_count) {
-    StringView line = {0};
-    if (!input || !delim)  return line;
-    if (input->count == 0) return line;
-    if (delim_count == 0)  return line;
-    if (input->count < delim_count) return line;
-
-	size_t i = 0;
-	while (i < input->count) {
-		size_t equal = 0;
-		for (size_t d = 0; d < delim_count; ++d) {
-			if (i+d >= input->count) break;
-			if (input->items[i+d] == delim[d]) equal++;
-		}
-		if (equal == delim_count) break;
-		++i;
-	}
-
-	line.items = input->items;
-	line.count = i;
-
-	if (i == input->count) {
-		input->items += input->count;
-		input->count = 0;
-	} else {
-		input->items += i + delim_count;
-		input->count -= i + delim_count;
-	}
-
-	return line;
-}
-
-
-typedef struct {
-	char* name;
-	char* path;
-	StringBuilder rendered_code;
-	bool is_include;
-} MiteTemplate;
-
-typedef struct {
-	char* name;
-	char* md_path;
-	char* final_html_path;
-
-	StringBuilder rendered_code;
-	StringBuilder front_matter;
-} MitePage;
-
-typedef struct {
-	MitePage* items;
-	size_t count;
-	size_t capacity;
-} MitePages;
-
-typedef struct {
-	MiteTemplate* items;
-	size_t count;
-	size_t capacity;
-} MiteTemplates;
-
-
-
-//#define SECOND_STAGE // for development
+#define SECOND_STAGE // for development
 #ifdef SECOND_STAGE
 
 static char temp_sprintf_buf[16] = {0};
@@ -342,9 +279,9 @@ void unusedtemp() { (void)temp_sprintf_buf; }
 #define SV(x) SVP(&(x))
 #define STR(x) CSTR((x))
 
-#define CONTENT() render_page_content_func(out, page);
+#define CONTENT() render_content_func(out, page);
 #define INCLUDE(mitename) do { SiteTemplate* st = find_template(&global.templates, (mitename)); \
-							if (st && st->is_include) st->function(out, page, render_page_content_func); } while(0);
+							if (st && st->is_include) st->function(out, page, render_content_func); } while(0);
 
 typedef struct {
 	const char* key;
@@ -374,8 +311,8 @@ typedef struct {
 } SitePages;
 
 
-typedef void (*render_page_content_func_t)(StringBuilder* out, SitePage* page);
-typedef void (*render_template_func_t)(StringBuilder* out, SitePage* page, render_page_content_func_t render_page_content_func);
+typedef void (*render_content_func_t) (StringBuilder* out, SitePage* page);
+typedef void (*render_template_func_t)(StringBuilder* out, SitePage* page, render_content_func_t render_content_func);
 
 typedef struct {
 	const char* name;
@@ -822,26 +759,99 @@ void render_md_to_html(StringBuilder* md, StringBuilder* out, StringBuilder* out
 // ------------------- /md2html/ ------------------------
 
 
-StringBuilder print_content_into_layout(const StringBuilder* const layout, const StringBuilder* const content) {
-	StringBuilder result = {0};
+typedef struct {
+	char* name;
+	char* path;
+	StringBuilder rendered_code;
+	bool is_include;
+} MiteTemplate;
 
-	StringView macro = { .items = "CONTENT()", .count = 9 };
-	size_t content_loc = sv_strstr(SB_TO_SV(layout), macro);
+typedef struct {
+	char* name;
+	char* md_path;
+	char* final_html_path;
 
-	if (content_loc == layout->count) {
-		// no content found, could be untemplated page, print as is
-		da_append_many(&result, layout->items, layout->count);
-		return result;
+	StringBuilder rendered_code;
+	StringBuilder front_matter;
+} MitePage;
+
+typedef struct {
+	MitePage* items;
+	size_t count;
+	size_t capacity;
+} MitePages;
+
+typedef struct {
+	MiteTemplate* items;
+	size_t count;
+	size_t capacity;
+} MiteTemplates;
+
+
+static inline StringView sv_trim(StringView input) {
+	StringView sv = input;
+
+	int l = 0;
+	while (l < sv.count && (sv.items[l] == ' ' || sv.items[l] == '\t' || sv.items[l] == '\n')) l++;
+
+	sv.items += l;
+	sv.count -= l;
+
+	int r = sv.count - 1;
+	while (r >= 0 && (sv.items[r] == ' ' || sv.items[r] == '\t' || sv.items[r] == '\n')) r--;
+
+	sv.count = r + 1;
+
+	return sv;
+}
+static inline StringView sv_trim_empty_lines(StringView input) {
+	StringView sv = input;
+
+	int empty = 0;
+	while (empty < sv.count && (sv.items[empty] == ' ' || sv.items[empty] == '\t')) empty++;
+
+	if (empty+1 < sv.count && sv.items[empty+1] == '\n') {
+		sv.items += empty;
+		sv.count -= empty;
 	}
 
-	da_append_many(&result, layout->items, content_loc);
-	da_append_many(&result, content->items, content->count);
+	int r = sv.count - 1;
+	while (r >= 0 && (sv.items[r] == ' ' || sv.items[r] == '\t' || sv.items[r] == '\n')) r--;
+	sv.count = r + 1;
 
-	const char* after_macro  = layout->items + content_loc + macro.count;
-	size_t after_macro_count = layout->count - content_loc - macro.count;
-	da_append_many(&result, after_macro, after_macro_count);
+	return sv;
+}
 
-	return result;
+static inline StringView chop_until(StringView* input, const char* delim, const size_t delim_count) {
+    StringView line = {0};
+    if (!input || !delim)  return line;
+    if (input->count == 0) return line;
+    if (delim_count == 0)  return line;
+    if (input->count < delim_count) return line;
+
+	size_t i = 0;
+	while (i < input->count) {
+		size_t equal = 0;
+		for (size_t d = 0; d < delim_count; ++d) {
+			if (i+d >= input->count) break;
+			if (input->items[i+d] == delim[d]) equal++;
+		}
+		if (equal == delim_count) break;
+		++i;
+	}
+
+	line.items = input->items;
+	line.count = i;
+
+	if (i == input->count) {
+		input->items += input->count;
+		input->count = 0;
+	} else {
+		input->items += i + delim_count;
+		input->count -= i + delim_count;
+	}
+
+	return line;
 }
 
 
@@ -1201,7 +1211,7 @@ void second_stage_codegen(StringBuilder* out, MitePages* pages, MiteTemplates* t
 
 		da_append_cstr(out, "void render_template_");
 		da_append_cstr(out, mt->name);
-		da_append_cstr(out, "(StringBuilder* out, SitePage* page, render_page_content_func_t render_page_content_func) {\n");
+		da_append_cstr(out, "(StringBuilder* out, SitePage* page, render_content_func_t render_content_func) {\n");
 
 		da_append_many(out, mt->rendered_code.items, mt->rendered_code.count);
 
@@ -1243,7 +1253,7 @@ void second_stage_codegen(StringBuilder* out, MitePages* pages, MiteTemplates* t
 		da_append_cstr(out, "void render_");
 		da_append_cstr(out, mp->name);
 		da_append_cstr(out, "(StringBuilder* out, SitePage* page) {\n");
-		da_append_cstr(out, "	render_page_content_func_t render_page_content_func = NULL;\n");
+		da_append_cstr(out, "	render_content_func_t render_content_func = NULL;\n");
 
 
 		da_append_many(out, mp->rendered_code.items, mp->rendered_code.count);
