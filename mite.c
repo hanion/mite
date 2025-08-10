@@ -293,6 +293,8 @@ typedef struct {
 	const char* date;
 	const char* tags;
 	const char* layout;
+	const char* output;
+	const char* input;
 	SiteMap data;
 } SitePage;
 
@@ -336,16 +338,17 @@ typedef struct {
 
 
 
-
-SitePage* find_page(SitePages* pages, const char* url) {
+SitePage* find_page(SitePages* pages, const char* input_file) {
+	if (!input_file) return NULL;
 	for (size_t i = 0; i < pages->count; ++i) {
 		if (!pages->items[i]) continue;
 		if (!pages->items[i]->url) continue;
-		if (0 == strcmp(pages->items[i]->url, url)) return pages->items[i];
+		if (0 == strcmp(pages->items[i]->input, input_file)) return pages->items[i];
 	}
 	return NULL;
 }
 SiteTemplate* find_template(SiteTemplates* templates, const char* name) {
+	if (!name) return NULL;
 	for (size_t i = 0; i < templates->count; ++i) {
 		if (!templates->items[i].name) continue;
 		if (0 == strcmp(templates->items[i].name, name)) return &templates->items[i];
@@ -371,6 +374,8 @@ SitePage* site_page_new_tdu(const char* title, const char* desc, const char* url
 #define ADD_SOCIAL(t, u)     da_append(&global.socials,  site_page_new_tdu((t),NULL,(u)));
 
 #define ADD_TO_GLOBAL_POSTS(page) da_append(&global.posts, (page));
+#define SET_POST() ADD_TO_GLOBAL_POSTS(page)
+
 
 
 void site_map_set(SiteMap* map, const char* key, const char* value) {
@@ -1188,6 +1193,13 @@ void second_stage_codegen(StringBuilder* out, MitePages* pages, MiteTemplates* t
 		da_append_cstr(out, "\", NULL, \"");
 		da_append_cstr(out, (mp->final_html_path+1)); // +1 removes the . in the path
 		da_append_cstr(out, "\");\n");
+		da_append_cstr(out, "		page->output = \"");
+		da_append_cstr(out, mp->final_html_path+2); // +2 removes ./
+		da_append_cstr(out, "\";\n");
+		da_append_cstr(out, "		page->input = \"");
+		da_append_cstr(out, mp->md_path);
+		da_append_cstr(out, "\";\n");
+
 		da_append_cstr(out, "		da_append(&global.pages, page);\n");
 
 		da_append_sv(out, &mp->front_matter);
@@ -1265,25 +1277,20 @@ void second_stage_codegen(StringBuilder* out, MitePages* pages, MiteTemplates* t
 
 		da_append_cstr(out, "	{\n");
 
-		da_append_cstr(out, "		printf(\"[rendering] ");
-		da_append_cstr(out, mp->final_html_path+2);
-		da_append_cstr(out, "\\n\");\n");
-
 		da_append_cstr(out, "		SitePage* page = find_page(&global.pages, \"");
-		da_append_cstr(out, (mp->final_html_path+1)); // +1 removes the . in the path
+		da_append_cstr(out, mp->md_path);
 		da_append_cstr(out, "\");\n");
+		da_append_cstr(out, "		printf(\"[rendering] %s\\n\", page->output);\n");
 
 		da_append_cstr(out, "		SiteTemplate* st = find_template(&global.templates, page->layout);\n");
-
-
-		da_append_cstr(out, "		st->function");
-		da_append_cstr(out, "(&out, page, render_");
+		da_append_cstr(out, "		if (st) st->function(&out, page, render_");
 		da_append_cstr(out, mp->name);
 		da_append_cstr(out, ");\n");
+		da_append_cstr(out, "		else render_");
+		da_append_cstr(out, mp->name);
+		da_append_cstr(out, "(&out, page);\n");
 
-		da_append_cstr(out, "		write_to_file(\"");
-		da_append_cstr(out, mp->final_html_path);
-		da_append_cstr(out, "\", &out);\n");
+		da_append_cstr(out, "		write_to_file(page->output, &out);\n");
 		da_append_cstr(out, "		out.count = 0;\n");
 
 
