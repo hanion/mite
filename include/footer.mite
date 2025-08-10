@@ -1,9 +1,9 @@
 <footer>
 	<p>
 		<? for (size_t i = 0; i < global.socials.count; ++i) { ?>
-			<a href="<? STR(global.socials.items[i]->url) ?>"><? STR(global.socials.items[i]->title) ?></a>
-			<? if (i < global.socials.count - 1) { ?> | <? } ?>
+			<a href="<? STR(global.socials.items[i]->url) ?>"><? STR(global.socials.items[i]->title) ?></a> |
 		<? } ?>
+		<a href="/rss.xml">rss</a>
 	</p>
 </footer>
 

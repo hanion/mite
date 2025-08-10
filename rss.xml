@@ -1,0 +1,6 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<rss version="2.0" xmlns:atom="http://www.w3.org/2005/Atom">
+<channel>
+<title>hanion.dev</title><link>https://hanion.dev</link><description>recreational programmer</description><language>en-us</language><lastBuildDate>Tue, 20 Jan 2026 00:00:00 +0000</lastBuildDate><atom:link href="https://hanion.dev/rss.xml" rel="self" type="application/rss+xml" /><item>
+<title>another post title</title><link>https://hanion.dev/post/another-post/index.html</link><guid isPermaLink="true">https://hanion.dev/post/another-post/index.html</guid><pubDate>Tue, 20 Jan 2026 00:00:00 +0000</pubDate><description></description></item><item>
+<title>my post title</title><link>https://hanion.dev/post/my-post/index.html</link><guid isPermaLink="true">https://hanion.dev/post/my-post/index.html</guid><pubDate>Tue, 30 Dec 2025 00:00:00 +0000</pubDate><description></description></item></channel></rss>

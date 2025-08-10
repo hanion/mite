@@ -108,6 +108,7 @@ source: https://github.com/hanion/hanion.github.io
 #include <stdbool.h>
 #include <stdlib.h>
 #include <string.h>
+#include <time.h>
 
 #define MAX_PATH_LEN 1024
 
@@ -443,6 +444,21 @@ void sort_pages(SitePages* sp) {
 	}
 }
 
+char* format_rfc822(const char *ymd) {
+	char* out = calloc(64, sizeof(char));
+	struct tm t = {0};
+	sscanf(ymd, "%d-%d-%d", &t.tm_year, &t.tm_mon, &t.tm_mday);
+	t.tm_year -= 1900;
+	t.tm_mon  -= 1;
+	t.tm_hour = 0;
+	t.tm_min = 0;
+	t.tm_sec = 0;
+
+	mktime(&t);
+
+	strftime(out, 64, "%a, %d %b %Y %H:%M:%S +0000", &t);;
+	return out;
+}
 
 #endif
 // --- SECOND STAGE END ---
@@ -1049,8 +1065,10 @@ void search_files(MitePages* pages, MiteTemplates* templates) {
 		if (strcmp(entry->d_name, ".") == 0 || strcmp(entry->d_name, "..") == 0) continue;
 
 		// index.md
-		if (entry->d_type == DT_REG && (0 == strcmp(entry->d_name, "index.md"))) {
-			register_md_file(pages, ".", "index.md");
+		if (entry->d_type == DT_REG) {
+			if (0 == strcmp(entry->d_name, "index.md") || 0 == strcmp(entry->d_name, "rss.md")) {
+				register_md_file(pages, ".", entry->d_name);
+			}
 			continue;
 		}
 

@@ -6,6 +6,7 @@
 		<meta property=      "og:title" content="<? STR(global.title) ?>"/>
 		<meta name=       "description" content="<? STR(global.description) ?>"/>
 		<meta property="og:description" content="<? STR(global.description) ?>"/>
+		<link rel="alternate" type="application/rss+xml" title="rss feed" href="/rss.xml" />
 	</head>
 	<body class="home">
 		<div class="wrapper">
