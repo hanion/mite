@@ -376,6 +376,7 @@ SitePage* site_page_new_tdu(const char* title, const char* desc, const char* url
 
 #define ADD_TO_GLOBAL_POSTS(page) da_append(&global.posts, (page));
 #define SET_POST() ADD_TO_GLOBAL_POSTS(page)
+#define SET_PROJECT() da_append(&global.projects, (page));
 
 
 
