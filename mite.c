@@ -162,6 +162,7 @@ typedef struct {
 	#include <sys/stat.h>
 	#include <dirent.h>
 	#include <unistd.h>
+	#include <signal.h>
 #else
 	#include <windows.h>
 #endif
@@ -183,6 +184,59 @@ static inline int execute_line(const char* line) {
 	char full_command[CMD_LINE_MAX + 16];
 	snprintf(full_command, sizeof(full_command), "cmd /C \"%s\"", line);
 	return system(full_command);
+#endif
+}
+
+
+
+#ifndef _WIN32
+static pid_t g_watcher_pid = -1;
+#else
+static HANDLE g_watcher_proc = NULL;
+#endif
+
+void start_watcher() {
+#ifndef _WIN32
+	g_watcher_pid = fork();
+	if (g_watcher_pid == 0) {
+		execl("./mite", "mite", "--watch", NULL);
+		_exit(1);
+	}
+#else
+	PROCESS_INFORMATION pi;
+	STARTUPINFO si = {0};
+	si.cb = sizeof(si);
+
+	if (CreateProcess(NULL, "mite.exe --watch", NULL, NULL, FALSE,
+				   CREATE_NO_WINDOW, NULL, NULL, &si, &pi)) {
+		g_watcher_proc = pi.hProcess;  // store HANDLE
+		CloseHandle(pi.hThread);       // thread handle not needed
+	}
+#endif
+}
+
+void watch() {
+#ifndef _WIN32
+	execute_line("./mite --incremental");
+	sleep(1);
+#else
+	execute_line("mite.exe --incremental");
+	Sleep(1000);
+#endif
+}
+
+void stop_watcher() {
+#ifndef _WIN32
+	if (g_watcher_pid > 0) {
+		kill(g_watcher_pid, SIGTERM);
+		g_watcher_pid = -1;
+	}
+#else
+	if (g_watcher_proc) {
+		TerminateProcess(g_watcher_proc, 0);
+		CloseHandle(g_watcher_proc);
+		g_watcher_proc = NULL;
+	}
 #endif
 }
 
@@ -1020,6 +1074,8 @@ void render_all(MitePages* pages, MiteTemplates* templates) {
 	}
 }
 
+extern char* strdup(const char*);
+
 MiteTemplate* create_template(MiteTemplates* templates, const char* path) {
 	da_append(templates, (MiteTemplate){0});
 	MiteTemplate* mt = &templates->items[templates->count-1];
@@ -1057,7 +1113,7 @@ int is_md_file(const char* name) {
 }
 
 void join_path(char* out, const char* a, const char* b) {
-	sprintf(out, "%s/%s", a, b);
+	snprintf(out, MAX_PATH_LEN*2, "%s/%s", a, b);
 }
 
 
@@ -1369,6 +1425,121 @@ void second_stage_codegen(StringBuilder* out, MitePages* pages, MiteTemplates* t
 	);
 }
 
+uint64_t get_modification_time(const char *path_cstr) {
+#ifndef _WIN32
+	struct stat st;
+	if (stat(path_cstr, &st) != 0) return 0;
+	return (uint64_t)st.st_mtime;
+#else
+	WIN32_FILE_ATTRIBUTE_DATA attr;
+	if (!GetFileAttributesExA(path_cstr, GetFileExInfoStandard, &attr)) return 0;
+
+	FILETIME ft = attr.ftLastWriteTime;
+	ULARGE_INTEGER ull;
+	ull.LowPart  = ft.dwLowDateTime;
+	ull.HighPart = ft.dwHighDateTime;
+
+	return (ull.QuadPart - 116444736000000000ULL) / 10000000ULL;
+#endif
+}
+
+bool check_need_to_render(MitePages* pages, MiteTemplates* templates) {
+	uint64_t most_recent_template = 0;
+
+	for (size_t i = 0; i < templates->count; ++i) {
+		MiteTemplate* mt = &templates->items[i];
+		uint64_t time = get_modification_time(mt->path);
+		if (time > most_recent_template) most_recent_template = time;
+	}
+
+	for (size_t i = 0; i < pages->count; ++i) {
+		MitePage* mp = &pages->items[i];
+		uint64_t time_html = get_modification_time(mp->final_html_path);
+		uint64_t time_md   = get_modification_time(mp->md_path);
+
+		if (time_md > time_html) return true;
+		if (most_recent_template > time_html) return true;
+	}
+
+	return false;
+}
+
+
+typedef struct {
+	MitePages pages;
+	MiteTemplates templates;
+	const char* mite_source_path;
+
+	StringBuilder second_stage;
+
+	bool arg_first_stage;
+	bool arg_keep;
+	bool arg_serve;
+	bool arg_watch;
+	bool arg_incremental;
+	bool arg_no_watcher;
+} MiteGenerator;
+
+int mite_generate(MiteGenerator* m) {
+	while(m->arg_watch) watch();
+
+	bool need_to_render = m->arg_incremental ? check_need_to_render(&m->pages, &m->templates) : true;
+	int result = 0;
+
+	if (need_to_render) {
+		render_all(&m->pages, &m->templates);
+
+		second_stage_extract_header(&m->second_stage, m->mite_source_path);
+		second_stage_codegen(&m->second_stage, &m->pages, &m->templates);
+		write_to_file("site.c", &m->second_stage);
+		printf("[generated] site\n");
+
+		if (m->arg_first_stage) return 0;
+
+		result = build_and_run_site();
+		if (result == 0 && !m->arg_keep) cleanup_site();
+
+		if (result == 0) printf("[done]\n");
+		else             printf("[failed]\n");
+	}
+
+	if (result == 0 && m->arg_serve) {
+		printf("[serving]\n");
+		if (!m->arg_no_watcher) start_watcher();
+		execute_line("python -m http.server");
+		if (!m->arg_no_watcher) stop_watcher();
+		printf("[done]\n");
+	}
+	return result;
+}
+
+void free_mite_generator(MiteGenerator* m) {
+	for (size_t i = 1; i < m->pages.count; ++i) {
+		MitePage* page = &m->pages.items[i];
+		free(page->md_path);
+		free(page->name);
+		free(page->final_html_path);
+		free(page->rendered_code.items);
+		free(page->front_matter.items);
+	}
+	free(m->pages.items[0].rendered_code.items);
+	free(m->pages.items[0].front_matter.items);
+	free(m->pages.items);
+
+
+	for (size_t i = 0; i < m->templates.count; ++i) {
+		MiteTemplate* t = &m->templates.items[i];
+		if (t->path) {
+			free(t->name);
+			free(t->path);
+			free(t->rendered_code.items);
+		}
+	}
+
+	free(m->templates.items);
+	free(m->second_stage.items);
+}
+
 void print_usage(const char* prog) {
 	printf("usage: %s [options]\n", prog);
 	printf("options:\n");
@@ -1377,27 +1548,26 @@ void print_usage(const char* prog) {
 	printf("  --keep           keep the generated site.c file\n");
 	printf("  --serve          serve the site with 'python -m http.server'\n");
 	printf("  --source         path to mite.c source file (default: ./mite.c or /usr/share/mite/mite.c)\n");
+	printf("  --incremental    render if there are changes\n");
+	printf("  --no-watcher     do not start a watcher while serving\n");
 }
 
 
 int main(int argc, char** argv) {
-	bool arg_first_stage = false;
-	bool arg_keep = false;
-	bool arg_serve = false;
-	const char* mite_source_path = NULL;
+	MiteGenerator m = {0};
 
 	for (int i = 1; i < argc; ++i) {
 		if (strcmp(argv[i], "--help") == 0 || strcmp(argv[i], "-h") == 0) {
 			print_usage(argv[0]);
 			return 0;
-		} else if (strcmp(argv[i], "--first-stage") == 0) {
-			arg_first_stage = true;
-		} else if (strcmp(argv[i], "--keep") == 0) {
-			arg_keep = true;
-		} else if (strcmp(argv[i], "--serve") == 0) {
-			arg_serve = true;
-		} else if ((strcmp(argv[i], "--source") == 0) && i + 1 < argc) {
-			mite_source_path = argv[++i];
+		} else if (0 == strcmp(argv[i], "--first-stage")) { m.arg_first_stage = true;
+		} else if (0 == strcmp(argv[i], "--keep"))        { m.arg_keep        = true;
+		} else if (0 == strcmp(argv[i], "--serve"))       { m.arg_serve       = true;
+		} else if (0 == strcmp(argv[i], "--watch"))       { m.arg_watch       = true;
+		} else if (0 == strcmp(argv[i], "--incremental")) { m.arg_incremental = true;
+		} else if (0 == strcmp(argv[i], "--no-watcher"))  { m.arg_no_watcher  = true;
+		} else if ((0 == strcmp(argv[i], "--source")) && i + 1 < argc) {
+			m.mite_source_path = argv[++i];
 		} else {
 			fprintf(stderr, "unknown option: %s\n", argv[i]);
 			print_usage(argv[0]);
@@ -1405,85 +1575,28 @@ int main(int argc, char** argv) {
 		}
 	}
 
-	if (!mite_source_path) {
+	if (!m.mite_source_path) {
 		if (file_exists("./mite.c")) {
-			mite_source_path = "./mite.c";
+			m.mite_source_path = "./mite.c";
 		} else if (file_exists("/usr/share/mite/mite.c")) {
-			mite_source_path = "/usr/share/mite/mite.c";
+			m.mite_source_path = "/usr/share/mite/mite.c";
 		} else {
 			fprintf(stderr, "[error] mite.c source not found.\n\tplease provide it with --source option.\n");
 			return 1;
 		}
 	}
-	if (strlen(mite_source_path) < 3) {
+	if (strlen(m.mite_source_path) < 3) {
 		print_usage(argv[0]);
 		return 1;
 	}
-	if (!file_exists(mite_source_path)) {
-		fprintf(stderr, "[error] file '%s' not found.\n", mite_source_path);
+	if (!file_exists(m.mite_source_path)) {
+		fprintf(stderr, "[error] file '%s' not found.\n", m.mite_source_path);
 		return 1;
 	}
 
-	MitePages pages = {0};
-	MiteTemplates templates = {0};
-
-	search_files(&pages, &templates);
-
-	render_all(&pages, &templates);
-
-	StringBuilder second_stage = {0};
-	second_stage_extract_header(&second_stage, mite_source_path);
-	second_stage_codegen(&second_stage, &pages, &templates);
-
-	write_to_file("site.c", &second_stage);
-	printf("[generated] site\n");
-
-	int result = 0;
-
-	if (!arg_first_stage) {
-		result = build_and_run_site();
-		if (!arg_keep) {
-			cleanup_site();
-		}
-	}
-	
-	if (result == 0) {
-		printf("[done]\n");
-	} else {
-		printf("[failed]\n");
-	}
-
-	for (size_t i = 1; i < pages.count; ++i) {
-		MitePage* page = &pages.items[i];
-		free(page->md_path);
-		free(page->name);
-		free(page->final_html_path);
-		free(page->rendered_code.items);
-		free(page->front_matter.items);
-	}
-	free(pages.items[0].rendered_code.items);
-	free(pages.items[0].front_matter.items);
-	free(pages.items);
-
-
-	for (size_t i = 0; i < templates.count; ++i) {
-		MiteTemplate* t = &templates.items[i];
-		if (t->path) {
-			free(t->name);
-			free(t->path);
-			free(t->rendered_code.items);
-		}
-	}
-
-	free(templates.items);
-	free(second_stage.items);
-
-	if (result == 0 && arg_serve) {
-		printf("[serving]\n");
-		execute_line("python -m http.server");
-		printf("[done]\n");
-	}
-
+	search_files(&m.pages, &m.templates);
+	int result = mite_generate(&m);
+	free_mite_generator(&m);
 	return result;
 }
 
