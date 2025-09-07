@@ -1,6 +1,7 @@
 /*
 
-# mite
+[mite](https://github.com/hanion/mite)
+
 MInimal TEmplated static site generator with C templates
 
 ## what it does
@@ -289,7 +290,10 @@ typedef struct {
 
 typedef struct {
 	const char* title;
-	const char* description;
+	union {
+		const char* description;
+		const char* desc;
+	};
 	const char* url;
 	const char* date;
 	const char* tags;
@@ -375,7 +379,7 @@ SitePage* site_page_new_tdu(const char* title, const char* desc, const char* url
 #define ADD_SOCIAL(t, u)     da_append(&global.socials,  site_page_new_tdu((t),NULL,(u)));
 
 #define ADD_TO_GLOBAL_POSTS(page) da_append(&global.posts, (page));
-#define SET_POST() ADD_TO_GLOBAL_POSTS(page)
+#define SET_POST()    da_append(&global.posts,    (page));
 #define SET_PROJECT() da_append(&global.projects, (page));
 
 
@@ -445,6 +449,33 @@ void sort_pages(SitePages* sp) {
 	}
 }
 
+
+static int compare_ddmmyyyy(const char* a, const char* b) {
+	if (!a || !b) return 0;
+	int da, ma, ya;
+	int db, mb, yb;
+	if (sscanf(a, "%d/%d/%d", &da, &ma, &ya) != 3) return 0;
+	if (sscanf(b, "%d/%d/%d", &db, &mb, &yb) != 3) return 0;
+	if (ya != yb) return (ya > yb) ? -1 : 1;
+	if (ma != mb) return (ma > mb) ? -1 : 1;
+	if (da != db) return (da > db) ? -1 : 1;
+	return 0;
+}
+
+void sort_pages_alt(SitePages* sp) {
+	for (size_t i = 0; i < sp->count; ++i) {
+		for (size_t j = i + 1; j < sp->count; ++j) {
+			if (!sp->items[i] || !sp->items[j]) continue;
+			if (!sp->items[i]->date || !sp->items[j]->date) continue;
+			if (compare_ddmmyyyy(sp->items[i]->date, sp->items[j]->date) > 0) {
+				SitePage* tmp = sp->items[i];
+				sp->items[i] = sp->items[j];
+				sp->items[j] = tmp;
+			}
+		}
+	}
+}
+
 char* format_rfc822(const char *ymd) {
 	char* out = calloc(64, sizeof(char));
 	struct tm t = {0};
@@ -457,7 +488,7 @@ char* format_rfc822(const char *ymd) {
 
 	mktime(&t);
 
-	strftime(out, 64, "%a, %d %b %Y %H:%M:%S +0000", &t);;
+	strftime(out, 64, "%a, %d %b %Y %H:%M:%S +0000", &t);
 	return out;
 }
 
