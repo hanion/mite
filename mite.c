@@ -206,50 +206,65 @@ static inline void cleanup_site() {
 
 
 bool read_entire_file(const char* filepath_cstr, StringBuilder* sb) {
-	bool result = true;
+	if (!filepath_cstr || !sb) return false;
 
 	FILE* f = fopen(filepath_cstr, "rb");
-	if (f == NULL)                 { result = false; goto defer; }
-	if (fseek(f, 0, SEEK_END) < 0) { result = false; goto defer; }
+	if (f == NULL) {
+		printf("Could not open file %s: %s\n", filepath_cstr, strerror(errno));
+		return false;
+	}
+
+	if (fseek(f, 0, SEEK_END) < 0) { fclose(f); return false; }
 
 #ifndef _WIN32
 	long m = ftell(f);
 #else
-	long long m = _ftelli64(f);
+	__int64 m = _ftelli64(f);
 #endif
 
-	if (m < 0)                     { result = false; goto defer; }
-	if (fseek(f, 0, SEEK_SET) < 0) { result = false; goto defer; }
+	if (m < 0)                     { fclose(f); return false; }
+	if (fseek(f, 0, SEEK_SET) < 0) { fclose(f); return false; }
 
-	size_t new_count = sb->count + m;
-	if (new_count > sb->capacity) {
-		sb->items = realloc(sb->items, new_count);
-		assert(sb->items != NULL);
-		sb->capacity = new_count;
+	size_t file_size = (size_t)m;
+
+	size_t needed_capacity = sb->count + file_size;
+	if (needed_capacity > sb->capacity) {
+		char* new_items = realloc(sb->items, needed_capacity);
+		if (!new_items) {
+			fclose(f);
+			return false;
+		}
+		sb->items = new_items;
+		sb->capacity = needed_capacity;
 	}
 
-	fread(sb->items + sb->count, m, 1, f);
-	if (ferror(f)) { result = false; goto defer; }
-	sb->count = new_count;
-
-defer:
-	if (!result) {
-		printf("Could not read file %s: %s\n", filepath_cstr, strerror(errno));
+	size_t read_bytes = fread(sb->items + sb->count, 1, file_size, f);
+	if (read_bytes != file_size) {
+		if (ferror(f)) {
+			printf("Error reading file %s: %s\n", filepath_cstr, strerror(errno));
+		}
+		fclose(f);
+		return false;
 	}
-	if (f) { fclose(f); }
-	return result;
+
+	sb->count += read_bytes;
+
+	fclose(f);
+	return true;
 }
 
 bool write_to_file(const char* filepath_cstr, StringBuilder* sb) {
+	if (!filepath_cstr || !sb) return false;
+
 	FILE* f = fopen(filepath_cstr, "wb");
 	if (f == NULL) {
-		printf("Could not open file for writing: %s %s\n", filepath_cstr, strerror(errno));
+		printf("Could not open file %s for writing: %s\n", filepath_cstr, strerror(errno));
 		return false;
 	}
 
 	size_t written = fwrite(sb->items, 1, sb->count, f);
 	if (written != sb->count) {
-		printf("Error writing to file: %s\n", strerror(errno));
+		printf("Error writing to file %s: %s\n", filepath_cstr, strerror(errno));
 		fclose(f);
 		return false;
 	}
