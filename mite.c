@@ -688,6 +688,49 @@ void parse_inline(MdRenderer* r, const char* line) {
 			p = end_url + 1;
 			continue;
 		}
+		// figure
+		else if (starts_with(p, "![")) {
+			const char* end_text = search_str_until_newline(p+2, "]");
+			if (!end_text || end_text[1] != '(') {
+				da_append_many(r->out, p, 2);
+				p += 2;
+				continue;
+			}
+			const char* end_url = search_str_until_newline(end_text + 2, ")");
+			if (!end_url) break;
+
+			const char* format = end_url;
+			while (format > end_text && *(format-1) != '.') --format;
+
+			const size_t format_len = end_url - format;
+			bool video = false;
+			if (format_len == 3 && 0 == strncmp(format, "mp4",  3)) video = true;
+			if (format_len == 4 && 0 == strncmp(format, "webm", 4)) video = true;
+
+			const char* const start_text = p + 2;
+			const char* const start_url  = end_text + 2;
+			if (video) {
+				da_append_cstr(r->out, "<figure>\n\t<video autoplay controls muted loop playsinline width=\"100%\">\n\t\t<source src=\"");
+				da_append_many(r->out, start_url, end_url - start_url);
+				da_append_cstr(r->out, "\" type=\"video/");
+				da_append_many(r->out, format, format_len);
+				da_append_cstr(r->out, "\" alt=\"");
+				da_append_escape_html(r->out, start_text, end_text - start_text);
+				da_append_cstr(r->out, "\">\n\t</video>\n\t<figcaption>");
+				da_append_many(r->out, start_text, end_text - start_text);
+				da_append_cstr(r->out, "\n\t</figcaption>\n</figure>\n");
+			} else {
+				da_append_cstr(r->out, "<figure>\n\t<img src=\"");
+				da_append_many(r->out, start_url, end_url - start_url);
+				da_append_cstr(r->out, "\" alt=\"");
+				da_append_escape_html(r->out, start_text, end_text - start_text);
+				da_append_cstr(r->out, "\">\n\t<figcaption>");
+				da_append_many(r->out, start_text, end_text - start_text);
+				da_append_cstr(r->out, "</figcaption>\n</figure>\n");
+			}
+			p = end_url + 1;
+			continue;
+		}
 		else if (starts_with(p, "<?")) {
 			const char* tag_end = strstr(p + 2, "?>");
 			if (tag_end) {
@@ -846,6 +889,11 @@ void render_md_to_html(StringBuilder* md, StringBuilder* out, StringBuilder* out
 
 			r.cursor = code_end + 3;
 			continue;
+
+		} else if (starts_with(trimmed, "![")) {
+			// figure
+			end_paragraph();
+			parse_inline(&r, trimmed);
 
 		} else {
 			end_list();
