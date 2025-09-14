@@ -1,10 +1,10 @@
----
+```c
 page->layout = "post";
 page->title  = "my post title";
 page->date   = "2025-12-30";
 page->tags   = "math simulation";
-ADD_TO_GLOBAL_POSTS(page);
----
+SET_POST();
+```
 
 **important** content *here*
 

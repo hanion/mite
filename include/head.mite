@@ -1,9 +1,0 @@
-<head>
-	<meta charset="UTF-8">
-	<title><? STR(page->title) ?></title>
-	<meta property=      "og:title" content="<? STR(page->title) ?>"/>
-	<? if (page->description) { ?>
-	<meta name=       "description" content="<? STR(page->description) ?>"/>
-	<meta property="og:description" content="<? STR(page->description) ?>"/>
-	<? } ?>
-</head>

@@ -2,6 +2,8 @@
 
 MInimal TEmplated static site generator with C templates
 
+Learn more in my full post: [hanion.dev/post/mite](https://hanion.dev/post/mite)
+
 ## what it does
 
 - renders `.md` files to `.html` using `.mite` templates
@@ -27,7 +29,6 @@ $ cc -o mite mite.c && ./mite
 │   ├── home.mite
 │   └── post.mite
 ├── include/
-│   ├── head.mite
 │   └── footer.mite
 └── post/
     ├── my-post/
@@ -108,7 +109,7 @@ PAGE_SET("mathjax", "true");
 ---
 ```
 
-- `include/head.mite`
+- `layout/post.mite`
 ```c
 <? if (PAGE_IS("mathjax", "true")) { ?>
 	<!-- Load MathJax -->
