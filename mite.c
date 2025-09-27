@@ -1,4 +1,4 @@
-/*
+/* mite 1.2.2
 
 [mite](https://github.com/hanion/mite)
 
@@ -722,7 +722,7 @@ void parse_inline(MdRenderer* r, const char* line) {
 			} else {
 				da_append_cstr(r->out, "<figure>\n\t<img src=\"");
 				da_append_many(r->out, start_url, end_url - start_url);
-				da_append_cstr(r->out, "\" alt=\"");
+				da_append_cstr(r->out, "\" loading=\"lazy\" alt=\"");
 				da_append_escape_html(r->out, start_text, end_text - start_text);
 				da_append_cstr(r->out, "\">\n\t<figcaption>");
 				da_append_many(r->out, start_text, end_text - start_text);
