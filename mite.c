@@ -1,4 +1,4 @@
-/* mite 1.2.2
+/* mite 1.2.3
 
 [mite](https://github.com/hanion/mite)
 
@@ -848,7 +848,7 @@ void render_md_to_html(StringBuilder* md, StringBuilder* out, StringBuilder* out
 			parse_inline(&r, trimmed + 6);
 			da_append_cstr(out, "</li></ul>\n");
 
-		} else if (starts_with(trimmed, "- ")) {
+		} else if (starts_with(trimmed, "- ") || starts_with(trimmed, "* ")) {
 			end_paragraph();
 			start_list();
 			da_append_cstr(out, "<li>");
