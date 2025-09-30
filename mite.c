@@ -1122,28 +1122,6 @@ void render_all(MitePages* pages, MiteTemplates* templates) {
 	}
 }
 
-extern char* strdup(const char*);
-
-MiteTemplate* create_template(MiteTemplates* templates, const char* path) {
-	da_append(templates, (MiteTemplate){0});
-	MiteTemplate* mt = &templates->items[templates->count-1];
-
-	mt->path = strdup(path);
-	mt->name = strdup(mt->path+2);
-	size_t len = strlen(mt->name);
-	if (len > 3 && strcmp(mt->name + len - 3, ".md") == 0) {
-		len -= 3;
-	}
-	mt->name[len] = '\0';
-	for (size_t i = 0; i < len; ++i) {
-		if (!isalnum(mt->name[i])) {
-			mt->name[i] = '_';
-		}
-	}
-	return mt;
-}
-
-
 
 bool ends_with(const char* name, const char* ext) {
 	size_t len = strlen(name);
@@ -1165,6 +1143,7 @@ void join_path(char* out, const char* a, const char* b) {
 }
 
 
+extern char* strdup(const char*);
 void register_mite_file(MiteTemplates* templates, const char* mite_dir, const char* mite_name, bool is_include) {
 	da_append(templates, (MiteTemplate){0});
 	MiteTemplate* mt = &templates->items[templates->count-1];
@@ -1562,7 +1541,7 @@ int mite_generate(MiteGenerator* m) {
 }
 
 void free_mite_generator(MiteGenerator* m) {
-	for (size_t i = 1; i < m->pages.count; ++i) {
+	for (size_t i = 0; i < m->pages.count; ++i) {
 		MitePage* page = &m->pages.items[i];
 		free(page->md_path);
 		free(page->name);
@@ -1570,10 +1549,7 @@ void free_mite_generator(MiteGenerator* m) {
 		free(page->rendered_code.items);
 		free(page->front_matter.items);
 	}
-	free(m->pages.items[0].rendered_code.items);
-	free(m->pages.items[0].front_matter.items);
 	free(m->pages.items);
-
 
 	for (size_t i = 0; i < m->templates.count; ++i) {
 		MiteTemplate* t = &m->templates.items[i];
