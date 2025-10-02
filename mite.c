@@ -117,7 +117,7 @@ source: https://github.com/hanion/hanion.github.io
 	do {                                                                                           \
 		if ((expected_capacity) > (da)->capacity) {                                                \
 			if ((da)->capacity == 0) {                                                             \
-				(da)->capacity = 128;                                                              \
+				(da)->capacity = 1280;                                                              \
 			}                                                                                      \
 			while ((expected_capacity) > (da)->capacity) {                                         \
 				(da)->capacity *= 2;                                                               \
@@ -1039,12 +1039,18 @@ void byte_array_to_c_code(ByteArray* ba, StringBuilder* out) {
 	da_append_cstr(out, buffer);
 }
 
+inline char to_hex_char(uint8_t n) {
+	return (n < 10) ? ('0' + n) : ('a' + n - 10);
+}
+
 void sv_to_byte_array(StringView sv, ByteArray* out) {
-	static char buffer[16] = {0};
+	char buffer[4] = { '\\', 'x', 0, 0 };
 	for (uint64_t i = 0; i < sv.count; ++i) {
-		if (sv.items[i] == '\0') break;
-		sprintf(buffer, "\\x%02x", sv.items[i]);
-		da_append_cstr(&out->string, buffer);
+		uint8_t c = (uint8_t)sv.items[i];
+		if (c == '\0') break;
+		buffer[2] = to_hex_char(c >> 4);
+		buffer[3] = to_hex_char(c & 0xF);
+		da_append_many(&out->string, buffer, 4);
 		out->count++;
 	}
 }
