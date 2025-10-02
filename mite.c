@@ -101,6 +101,17 @@ source: https://github.com/hanion/hanion.github.io
 #define INCLUDE_DIR "./include"
 #define DEFAULT_PAGE_LAYOUT "default"
 
+#ifndef _WIN32
+	#define _DEFAULT_SOURCE
+	#include <sys/stat.h>
+	#include <dirent.h>
+	#include <unistd.h>
+	#include <signal.h>
+	#include <sys/types.h>
+#else
+	#include <windows.h>
+#endif
+
 #include <assert.h>
 #include <ctype.h>
 #include <errno.h>
@@ -117,7 +128,7 @@ source: https://github.com/hanion/hanion.github.io
 	do {                                                                                           \
 		if ((expected_capacity) > (da)->capacity) {                                                \
 			if ((da)->capacity == 0) {                                                             \
-				(da)->capacity = 1280;                                                              \
+				(da)->capacity = 1280;                                                             \
 			}                                                                                      \
 			while ((expected_capacity) > (da)->capacity) {                                         \
 				(da)->capacity *= 2;                                                               \
@@ -156,16 +167,6 @@ typedef struct {
 	size_t count;
 } StringView;
 
-
-
-#ifndef _WIN32
-	#include <sys/stat.h>
-	#include <dirent.h>
-	#include <unistd.h>
-	#include <signal.h>
-#else
-	#include <windows.h>
-#endif
 
 bool file_exists(const char* path) {
 #ifndef _WIN32
