@@ -1,4 +1,4 @@
-/* mite 1.2.3
+/* mite 1.3.0
 
 [mite](https://github.com/hanion/mite)
 
@@ -794,7 +794,7 @@ void render_md_to_html(StringBuilder* md, StringBuilder* out, StringBuilder* out
 				continue;
 			}
 		
-		} else if (starts_with(trimmed, "---\n")) {
+		} else if (starts_with(trimmed, "---")) {
 			if (trimmed != md->items) {
 				da_append_cstr(out, "<hr>");
 				r.cursor = trimmed + 3;
@@ -802,7 +802,7 @@ void render_md_to_html(StringBuilder* md, StringBuilder* out, StringBuilder* out
 			}
 
 			// frontmatter
-			const char* end = strstr(trimmed + 4, "---\n");
+			const char* end = strstr(trimmed + 3, "---");
 			if (end) {
 				trimmed += 3;
 				da_append_cstr(out_fm, "<?");
@@ -866,7 +866,7 @@ void render_md_to_html(StringBuilder* md, StringBuilder* out, StringBuilder* out
 		} else if (starts_with(trimmed, "```")) {
 			if (trimmed == md->items) {
 				// frontmatter
-				const char* end = strstr(trimmed + 4, "```\n");
+				const char* end = strstr(trimmed + 3, "```");
 				if (end) {
 					skip_after_newline(&trimmed);
 					da_append_cstr(out_fm, "<?");
@@ -909,8 +909,9 @@ void render_md_to_html(StringBuilder* md, StringBuilder* out, StringBuilder* out
 
 	end_paragraph();
 	end_list();
-	da_append(out, '\0');
-	da_append(out_fm, '\0');
+
+	if (out->count)    da_append(out, '\0');
+	if (out_fm->count) da_append(out_fm, '\0');
 
 #undef start_paragraph
 #undef   end_paragraph
@@ -1040,7 +1041,7 @@ void byte_array_to_c_code(ByteArray* ba, StringBuilder* out) {
 	da_append_cstr(out, buffer);
 }
 
-inline char to_hex_char(uint8_t n) {
+char to_hex_char(uint8_t n) {
 	return (n < 10) ? ('0' + n) : ('a' + n - 10);
 }
 
@@ -1099,6 +1100,10 @@ bool render_page(MitePage* mite_page) {
 	StringBuilder raw_html = {0};
 	StringBuilder raw_fm = {0};
 	render_md_to_html(&md, &raw_html, &raw_fm);
+
+	if (raw_fm.count == 0) {
+		printf("[warning] page does not have any front matter! '%s'\n", mite_page->md_path+2);
+	}
 
 	render_html_to_c(SB_TO_SV(&raw_html), &mite_page->rendered_code);
 	render_html_to_c(SB_TO_SV(&raw_fm), &mite_page->front_matter);
