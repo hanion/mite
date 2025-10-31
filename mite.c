@@ -1,4 +1,4 @@
-/* mite 1.3.1
+/* mite 1.3.3
 
 [mite](https://github.com/hanion/mite)
 
@@ -167,99 +167,6 @@ typedef struct {
 	size_t count;
 } StringView;
 
-
-bool file_exists(const char* path) {
-#ifndef _WIN32
-	return access(path, F_OK) == 0;
-#else
-	DWORD attrs = GetFileAttributesA(path);
-	return (attrs != INVALID_FILE_ATTRIBUTES) && !(attrs & FILE_ATTRIBUTE_DIRECTORY);
-#endif
-}
-
-static inline int execute_line(const char* line) {
-#ifndef _WIN32
-	return system(line);
-#else
-	#define CMD_LINE_MAX 2000
-	char full_command[CMD_LINE_MAX + 16];
-	snprintf(full_command, sizeof(full_command), "cmd /C \"%s\"", line);
-	return system(full_command);
-#endif
-}
-
-
-
-#ifndef _WIN32
-static pid_t g_watcher_pid = -1;
-#else
-static HANDLE g_watcher_proc = NULL;
-#endif
-
-void start_watcher() {
-#ifndef _WIN32
-	g_watcher_pid = fork();
-	if (g_watcher_pid == 0) {
-		execl("./mite", "mite", "--watch", NULL);
-		_exit(1);
-	}
-#else
-	PROCESS_INFORMATION pi;
-	STARTUPINFO si = {0};
-	si.cb = sizeof(si);
-
-	if (CreateProcess(NULL, "mite.exe --watch", NULL, NULL, FALSE,
-				   CREATE_NO_WINDOW, NULL, NULL, &si, &pi)) {
-		g_watcher_proc = pi.hProcess;  // store HANDLE
-		CloseHandle(pi.hThread);       // thread handle not needed
-	}
-#endif
-}
-
-void watch() {
-#ifndef _WIN32
-	execute_line("./mite --incremental");
-	sleep(1);
-#else
-	execute_line("mite.exe --incremental");
-	Sleep(1000);
-#endif
-}
-
-void stop_watcher() {
-#ifndef _WIN32
-	if (g_watcher_pid > 0) {
-		kill(g_watcher_pid, SIGTERM);
-		g_watcher_pid = -1;
-	}
-#else
-	if (g_watcher_proc) {
-		TerminateProcess(g_watcher_proc, 0);
-		CloseHandle(g_watcher_proc);
-		g_watcher_proc = NULL;
-	}
-#endif
-}
-
-static inline int build_and_run_site() {
-#ifndef _WIN32
-	return execute_line("cc -o site site.c && ./site");
-#else
-	return execute_line("gcc -o site.exe site.c && site.exe");
-#endif
-}
-
-static inline void cleanup_site() {
-#ifndef _WIN32
-	remove("site.c");
-	remove("site");
-#else
-	DeleteFileA("site.c");
-	DeleteFileA("site.exe");
-#endif
-}
-
-
 bool read_entire_file(const char* filepath_cstr, StringBuilder* sb) {
 	if (!filepath_cstr || !sb) return false;
 
@@ -328,7 +235,6 @@ bool write_to_file(const char* filepath_cstr, StringBuilder* sb) {
 	return true;
 }
 
-#define SECOND_STAGE // for development
 #ifdef SECOND_STAGE
 
 static char temp_sprintf_buf[16] = {0};
@@ -562,8 +468,117 @@ char* format_rfc822(const char *ymd) {
 	return out;
 }
 
+
+
+
+
+#else // #ifdef SECOND_STAGE
+
+
+
+
+
+bool file_exists(const char* path) {
+#ifndef _WIN32
+	return access(path, F_OK) == 0;
+#else
+	DWORD attrs = GetFileAttributesA(path);
+	return (attrs != INVALID_FILE_ATTRIBUTES) && !(attrs & FILE_ATTRIBUTE_DIRECTORY);
 #endif
-// --- SECOND STAGE END ---
+}
+
+static inline int execute_line(const char* line) {
+#ifndef _WIN32
+	return system(line);
+#else
+	#define CMD_LINE_MAX 2000
+	char full_command[CMD_LINE_MAX + 16];
+	snprintf(full_command, sizeof(full_command), "cmd /C \"%s\"", line);
+	return system(full_command);
+#endif
+}
+
+
+const char* get_mite_binary_path() {
+	if (file_exists("./mite")) {
+		return "./mite";
+	} else if (file_exists("/usr/bin/mite")) {
+		return "/usr/bin/mite";
+	}
+	return NULL;
+}
+
+
+#ifndef _WIN32
+static pid_t g_watcher_pid = -1;
+#else
+static HANDLE g_watcher_proc = NULL;
+#endif
+
+void start_watcher() {
+#ifndef _WIN32
+	g_watcher_pid = fork();
+	if (g_watcher_pid == 0) {
+		execl(get_mite_binary_path(), "mite", "--watch", NULL);
+		_exit(1);
+	}
+#else
+	PROCESS_INFORMATION pi;
+	STARTUPINFO si = {0};
+	si.cb = sizeof(si);
+
+	if (CreateProcess(NULL, "mite.exe --watch", NULL, NULL, FALSE,
+				   CREATE_NO_WINDOW, NULL, NULL, &si, &pi)) {
+		g_watcher_proc = pi.hProcess;  // store HANDLE
+		CloseHandle(pi.hThread);       // thread handle not needed
+	}
+#endif
+}
+
+void watch() {
+#ifndef _WIN32
+	execl(get_mite_binary_path(), "mite", "--incremental", NULL);
+	sleep(1);
+#else
+	execute_line("mite.exe --incremental");
+	Sleep(1000);
+#endif
+}
+
+void stop_watcher() {
+#ifndef _WIN32
+	if (g_watcher_pid > 0) {
+		kill(g_watcher_pid, SIGTERM);
+		g_watcher_pid = -1;
+	}
+#else
+	if (g_watcher_proc) {
+		TerminateProcess(g_watcher_proc, 0);
+		CloseHandle(g_watcher_proc);
+		g_watcher_proc = NULL;
+	}
+#endif
+}
+
+static inline int build_and_run_site() {
+#ifndef _WIN32
+	return execute_line("cc -o site site.c && ./site");
+#else
+	return execute_line("gcc -o site.exe site.c && site.exe");
+#endif
+}
+
+static inline void cleanup_site() {
+#ifndef _WIN32
+	remove("site.c");
+	remove("site");
+#else
+	DeleteFileA("site.c");
+	DeleteFileA("site.exe");
+#endif
+}
+
+
 
 
 // ------------------- md2html --------------------------
@@ -1326,14 +1341,11 @@ void search_files(MitePages* pages, MiteTemplates* templates) {
 }
 
 
-void second_stage_extract_header(StringBuilder* out, const char* source_path) {
-	StringBuilder source = {0};
-	if (!read_entire_file(source_path, &source)) exit(1);
-	StringView delim = { .items = "// --- SECOND STAGE END ---", .count = 27 };
-	size_t loc = sv_strstr(SB_TO_SV(&source), delim);
-	da_append_cstr(out, "\n#define SECOND_STAGE\n\n");
-	da_append_many(out, source.items, loc);
-	free(source.items);
+void second_stage_include_header(StringBuilder* out, const char* source_path) {
+	da_append_cstr(out, "#define SECOND_STAGE\n");
+	da_append_cstr(out, "#include \"");
+	da_append_cstr(out, source_path);
+	da_append_cstr(out, "\"\n\n");
 }
 
 void second_stage_codegen(StringBuilder* out, MitePages* pages, MiteTemplates* templates) {
@@ -1533,7 +1545,7 @@ int mite_generate(MiteGenerator* m) {
 	if (need_to_render) {
 		render_all(&m->pages, &m->templates);
 
-		second_stage_extract_header(&m->second_stage, m->mite_source_path);
+		second_stage_include_header(&m->second_stage, m->mite_source_path);
 		second_stage_codegen(&m->second_stage, &m->pages, &m->templates);
 		write_to_file("site.c", &m->second_stage);
 		printf("[generated] site\n");
@@ -1549,6 +1561,13 @@ int mite_generate(MiteGenerator* m) {
 
 	if (result == 0 && m->arg_serve) {
 		printf("[serving]\n");
+
+#ifndef _WIN32
+		if (get_mite_binary_path() == NULL) {
+			printf("[error] mite binary not found.\n");
+			return 1;
+		}
+#endif
 		if (!m->arg_no_watcher) start_watcher();
 		execute_line("python -m http.server");
 		if (!m->arg_no_watcher) stop_watcher();
@@ -1581,16 +1600,17 @@ void free_mite_generator(MiteGenerator* m) {
 	free(m->second_stage.items);
 }
 
+#define MITE_VERSION_CSTR "[mite v1.3.3]"
 void print_usage(const char* prog) {
+	printf(MITE_VERSION_CSTR"\n");
 	printf("usage: %s [options]\n", prog);
 	printf("options:\n");
-	printf("  -h, --help       show this help message\n");
+	printf("  --serve          build and serve the site with 'python -m http.server', then run the watcher\n");
+	printf("  --no-watcher     do not start a watcher while serving\n");
+	printf("  --incremental    render only if there are changes\n");
 	printf("  --first-stage    only generate site.c, do not compile or run\n");
 	printf("  --keep           keep the generated site.c file\n");
-	printf("  --serve          serve the site with 'python -m http.server'\n");
-	printf("  --source         path to mite.c source file (default: ./mite.c or /usr/share/mite/mite.c)\n");
-	printf("  --incremental    render if there are changes\n");
-	printf("  --no-watcher     do not start a watcher while serving\n");
+	printf("  --source <PATH>  path to mite.c source file (default: ./mite.c or /usr/share/mite/mite.c)\n");
 }
 
 
@@ -1600,6 +1620,9 @@ int main(int argc, char** argv) {
 	for (int i = 1; i < argc; ++i) {
 		if (strcmp(argv[i], "--help") == 0 || strcmp(argv[i], "-h") == 0) {
 			print_usage(argv[0]);
+			return 0;
+		} else if (0 == strcmp(argv[i], "--version")) {
+			printf(MITE_VERSION_CSTR"\n");
 			return 0;
 		} else if (0 == strcmp(argv[i], "--first-stage")) { m.arg_first_stage = true;
 		} else if (0 == strcmp(argv[i], "--keep"))        { m.arg_keep        = true;
@@ -1625,6 +1648,7 @@ int main(int argc, char** argv) {
 			fprintf(stderr, "[error] mite.c source not found.\n\tplease provide it with --source option.\n");
 			return 1;
 		}
+
 	}
 	if (strlen(m.mite_source_path) < 3) {
 		print_usage(argv[0]);
@@ -1642,3 +1666,4 @@ int main(int argc, char** argv) {
 }
 
 
+#endif // #ifdef SECOND_STAGE #else
