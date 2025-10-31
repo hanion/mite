@@ -1,4 +1,4 @@
-/* mite 1.3.0
+/* mite 1.3.1
 
 [mite](https://github.com/hanion/mite)
 
@@ -1521,6 +1521,11 @@ typedef struct {
 
 int mite_generate(MiteGenerator* m) {
 	while(m->arg_watch) watch();
+
+	if (m->pages.count == 0) {
+		printf("[done] nothing to do\n");
+		return 0;
+	}
 
 	bool need_to_render = m->arg_incremental ? check_need_to_render(&m->pages, &m->templates) : true;
 	int result = 0;
