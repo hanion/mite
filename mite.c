@@ -1,4 +1,4 @@
-/* mite 1.4.0
+/* mite 1.4.1
 
 [mite](https://github.com/hanion/mite)
 
@@ -1600,7 +1600,7 @@ void free_mite_generator(MiteGenerator* m) {
 	free(m->second_stage.items);
 }
 
-#define MITE_VERSION_CSTR "[mite v1.4.0]"
+#define MITE_VERSION_CSTR "[mite v1.4.1]"
 void print_usage(const char* prog) {
 	printf(MITE_VERSION_CSTR"\n");
 	printf("usage: %s [options]\n", prog);
