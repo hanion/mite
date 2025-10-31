@@ -1,4 +1,4 @@
-/* mite 1.3.3
+/* mite 1.4.0
 
 [mite](https://github.com/hanion/mite)
 
@@ -670,9 +670,9 @@ void parse_inline(MdRenderer* r, const char* line) {
 	}
 
 	const char* p = line;
-	while (*p && *p != '\n') {
+	while (*p && (*p != '\r') && (*p != '\n')) {
 		// double space line break
-		if (p[0] == ' ' && p[1] == ' ' && p[2] == '\n') {
+		if (starts_with(p, "  \n") || starts_with(p, "  \r\n")) {
 			da_append_cstr(r->out, "<br>\n");
 			p += 3;
 			break;
@@ -794,7 +794,7 @@ void render_md_to_html(StringBuilder* md, StringBuilder* out, StringBuilder* out
 		while (*line_end && *line_end != '\n') line_end++;
 
 		const char* trimmed = r.cursor;
-		while (*trimmed == ' ' || *trimmed == '\t') trimmed++;
+		while (*trimmed == ' ' || *trimmed == '\t' || *trimmed == '\r') trimmed++;
 
 		// empty line ends paragraph
 		if (line_end - trimmed == 0) {
@@ -971,13 +971,13 @@ static inline StringView sv_trim(StringView input) {
 	StringView sv = input;
 
 	int l = 0;
-	while (l < sv.count && (sv.items[l] == ' ' || sv.items[l] == '\t' || sv.items[l] == '\n')) l++;
+	while (l < sv.count && (sv.items[l] == ' ' || sv.items[l] == '\t' || sv.items[l] == '\n' || sv.items[l] == '\r')) l++;
 
 	sv.items += l;
 	sv.count -= l;
 
 	int r = sv.count - 1;
-	while (r >= 0 && (sv.items[r] == ' ' || sv.items[r] == '\t' || sv.items[r] == '\n')) r--;
+	while (r >= 0 && (sv.items[r] == ' ' || sv.items[r] == '\t' || sv.items[r] == '\n' || sv.items[r] == '\r')) r--;
 
 	sv.count = r + 1;
 
@@ -995,7 +995,7 @@ static inline StringView sv_trim_empty_lines(StringView input) {
 	}
 
 	int r = sv.count - 1;
-	while (r >= 0 && (sv.items[r] == ' ' || sv.items[r] == '\t' || sv.items[r] == '\n')) r--;
+	while (r >= 0 && (sv.items[r] == ' ' || sv.items[r] == '\t' || sv.items[r] == '\n' || sv.items[r] == '\r')) r--;
 	sv.count = r + 1;
 
 	return sv;
@@ -1600,7 +1600,7 @@ void free_mite_generator(MiteGenerator* m) {
 	free(m->second_stage.items);
 }
 
-#define MITE_VERSION_CSTR "[mite v1.3.3]"
+#define MITE_VERSION_CSTR "[mite v1.4.0]"
 void print_usage(const char* prog) {
 	printf(MITE_VERSION_CSTR"\n");
 	printf("usage: %s [options]\n", prog);
