@@ -1,4 +1,4 @@
-/* mite 1.4.2
+/* mite 1.4.3
 
 [mite](https://github.com/hanion/mite)
 
@@ -798,102 +798,101 @@ void render_md_to_html(StringBuilder* md, StringBuilder* out, StringBuilder* out
 #define   end_list() if (r.in_list)  { da_append_cstr(out, "</ul>\n"); r.in_list = false; }
 
 	while (*r.cursor) {
+		while (*r.cursor == ' ' || *r.cursor == '\t' || *r.cursor == '\r') r.cursor++;
+
 		const char* line_end = r.cursor;
 		while (*line_end && *line_end != '\n') line_end++;
 
-		const char* trimmed = r.cursor;
-		while (*trimmed == ' ' || *trimmed == '\t' || *trimmed == '\r') trimmed++;
-
 		// empty line ends paragraph
-		if (line_end - trimmed == 0) {
+		if (line_end == r.cursor) {
 			end_paragraph();
 			end_list();
 
-		} else if (starts_with(trimmed, "<?")) {
-			const char* end = strstr(trimmed + 2, "?>");
+		} else if (starts_with(r.cursor, "<?")) {
+			const char* end = strstr(r.cursor + 2, "?>");
 			if (end) {
-				da_append_many(out, trimmed, end - trimmed + 2);
+				da_append_many(out, r.cursor, end - r.cursor + 2);
 				r.cursor = end + 2;
 				continue;
 			}
 		
-		} else if (starts_with(trimmed, "---")) {
-			if (trimmed != md->items) {
+		} else if (starts_with(r.cursor, "---")) {
+			if (r.cursor != md->items) {
 				da_append_cstr(out, "<hr>");
-				r.cursor = trimmed + 3;
+				r.cursor = r.cursor + 3;
 				continue;
 			}
 
 			// frontmatter
-			const char* end = strstr(trimmed + 3, "---");
+			const char* end = strstr(r.cursor + 3, "---");
 			if (end) {
-				trimmed += 3;
+				r.cursor += 3;
 				da_append_cstr(out_fm, "<?");
-				da_append_many(out_fm, trimmed, end - trimmed);
+				da_append_many(out_fm, r.cursor, end - r.cursor);
 				da_append_cstr(out_fm, "?>\n");
 				r.cursor = end + 3;
 				continue;
 			}
 
 		// HTML passthrough
-		} else if (*trimmed == '<') {
+		} else if (*r.cursor == '<') {
 			end_paragraph();
 			end_list();
 
-			const char* html_end_start = search_str_until_newline(trimmed, "</");
+			const char* html_end_start = search_str_until_newline(r.cursor, "</");
 			const char* html_end_end   = search_str_until_newline(html_end_start, ">");
 			if (!html_end_start || !html_end_end) {
-				append_until_newline(out, trimmed);
+				append_until_newline(out, r.cursor);
 			} else {
 				html_end_end++;
-				da_append_many(out, trimmed, html_end_end - trimmed);
+				da_append_many(out, r.cursor, html_end_end - r.cursor);
 				r.cursor = html_end_end;
 				parse_inline(&r, html_end_end);
 			}
 
-		} else if (*trimmed == '#') {
+		} else if (*r.cursor == '#') {
 			end_paragraph();
 			end_list();
 
 			int level = 0;
-			while (*trimmed == '#') { level++; trimmed++; }
-			while (*trimmed == ' ') trimmed++;
+			while (*r.cursor == '#') { level++; r.cursor++; }
+			while (*r.cursor == ' ') r.cursor++;
 
 			char tag[16];
 			sprintf(tag, "h%d", level);
 			da_append_cstr(out, "\n<"); da_append_cstr(out, tag); da_append(out, '>');
-			parse_inline(&r, trimmed);
+			parse_inline(&r, r.cursor);
 			da_append_cstr(out, "</"); da_append_cstr(out, tag); da_append_cstr(out, ">\n");
 
-		} else if (starts_with(trimmed, "- [ ] ")) {
+		} else if (starts_with(r.cursor, "- [ ] ")) {
 			end_paragraph();
 			end_list();
 			da_append_cstr(out, "<ul><li><input type=\"checkbox\" disabled>");
-			parse_inline(&r, trimmed + 6);
+			parse_inline(&r, r.cursor + 6);
 			da_append_cstr(out, "</li></ul>\n");
 
-		} else if (starts_with(trimmed, "- ") || starts_with(trimmed, "* ")) {
+		} else if (starts_with(r.cursor, "- ") || starts_with(r.cursor, "* ")) {
 			end_paragraph();
 			start_list();
 			da_append_cstr(out, "<li>");
-			parse_inline(&r, trimmed + 2);
+			parse_inline(&r, r.cursor + 2);
 			da_append_cstr(out, "</li>\n");
 
-		} else if (starts_with(trimmed, "> ")) {
+		} else if (starts_with(r.cursor, "> ")) {
 			end_paragraph();
 			end_list();
 			da_append_cstr(out, "<blockquote>");
-			parse_inline(&r, trimmed + 2);
+			parse_inline(&r, r.cursor + 2);
 			da_append_cstr(out, "</blockquote>\n");
 
-		} else if (starts_with(trimmed, "```")) {
-			if (trimmed == md->items) {
+		} else if (starts_with(r.cursor, "```")) {
+			if (r.cursor == md->items) {
 				// frontmatter
-				const char* end = strstr(trimmed + 3, "```");
+				const char* end = strstr(r.cursor + 3, "```");
 				if (end) {
-					skip_after_newline(&trimmed);
+					skip_after_newline(&r.cursor);
 					da_append_cstr(out_fm, "<?");
-					da_append_many(out_fm, trimmed, end - trimmed);
+					da_append_many(out_fm, r.cursor, end - r.cursor);
 					da_append_cstr(out_fm, "?>\n");
 					r.cursor = end + 3;
 					continue;
@@ -903,26 +902,26 @@ void render_md_to_html(StringBuilder* md, StringBuilder* out, StringBuilder* out
 			end_paragraph();
 			end_list();
 
-			const char* code_end = strstr(trimmed + 3, "```");
+			const char* code_end = strstr(r.cursor + 3, "```");
 			if (!code_end) code_end = md->items + md->count;
 
-			skip_after_newline(&trimmed); // skip language
+			skip_after_newline(&r.cursor); // skip language
 			da_append_cstr(out, "<pre><code>\n");
-			da_append_escape_html(out, trimmed, code_end - trimmed);
+			da_append_escape_html(out, r.cursor, code_end - r.cursor);
 			da_append_cstr(out, "</code></pre>\n");
 
 			r.cursor = code_end + 3;
 			continue;
 
-		} else if (starts_with(trimmed, "![")) {
+		} else if (starts_with(r.cursor, "![")) {
 			// figure
 			end_paragraph();
-			parse_inline(&r, trimmed);
+			parse_inline(&r, r.cursor);
 
 		} else {
 			end_list();
 			start_paragraph();
-			parse_inline(&r, trimmed);
+			parse_inline(&r, r.cursor);
 			da_append(out, '\n');
 		}
 
@@ -1608,7 +1607,7 @@ void free_mite_generator(MiteGenerator* m) {
 	free(m->second_stage.items);
 }
 
-#define MITE_VERSION_CSTR "[mite v1.4.2]"
+#define MITE_VERSION_CSTR "[mite v1.4.3]"
 void print_usage(const char* prog) {
 	printf(MITE_VERSION_CSTR"\n");
 	printf("usage: %s [options]\n", prog);
