@@ -1,4 +1,4 @@
-/* mite 1.4.1
+/* mite 1.4.2
 
 [mite](https://github.com/hanion/mite)
 
@@ -535,13 +535,21 @@ void start_watcher() {
 #endif
 }
 
-void watch() {
+void watch_forever_loop() {
 #ifndef _WIN32
-	execl(get_mite_binary_path(), "mite", "--incremental", NULL);
-	sleep(1);
+	StringBuilder line = {0};
+	da_append_cstr(&line, get_mite_binary_path());
+	da_append_cstr(&line, " --incremental");
+	da_append(&line, '\0');
+	while (1) {
+		execute_line(line.items);
+		usleep(500000); // 0.5 seconds
+	}
 #else
-	execute_line("mite.exe --incremental");
-	Sleep(1000);
+	while (1) {
+		execute_line("mite.exe --incremental");
+		Sleep(1000);
+	}
 #endif
 }
 
@@ -1532,7 +1540,7 @@ typedef struct {
 } MiteGenerator;
 
 int mite_generate(MiteGenerator* m) {
-	while(m->arg_watch) watch();
+	if (m->arg_watch) watch_forever_loop();
 
 	if (m->pages.count == 0) {
 		printf("[done] nothing to do\n");
@@ -1600,7 +1608,7 @@ void free_mite_generator(MiteGenerator* m) {
 	free(m->second_stage.items);
 }
 
-#define MITE_VERSION_CSTR "[mite v1.4.1]"
+#define MITE_VERSION_CSTR "[mite v1.4.2]"
 void print_usage(const char* prog) {
 	printf(MITE_VERSION_CSTR"\n");
 	printf("usage: %s [options]\n", prog);
